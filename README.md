@@ -4,6 +4,8 @@ BD Rhapsody™ Single-Cell Analysis
 
 # `Seven Bridges Command Line Interface`
 
++ Documentation : https://docs.sevenbridges.com/docs/command-line-interface
+  
 ### Install Seven Bridges Command Line Interface
 First you nedd to install the Seven Bridges Command Line Interface using the folloqing command:
 
