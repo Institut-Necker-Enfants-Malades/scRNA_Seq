@@ -2,7 +2,7 @@
 BD Rhapsody™ Single-Cell Analysis
 
 
-## Upload fastq files via Sevenbridges CLI
+## Upload fastq files via the Seven Bridges Command Line Interface
 
 ### Install Seven Bridges Command Line Interface
 First you nedd to install the Seven Bridges Command Line Interface using the folloqing command:
