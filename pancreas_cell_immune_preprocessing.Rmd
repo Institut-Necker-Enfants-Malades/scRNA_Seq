@@ -1,0 +1,918 @@
+---
+title: "Single Cell RNA-seq analysis, preprocessing step for Pancreas cell immune"
+author: "Lamine TOURE"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    fig_caption: yes
+    toc: true
+---
+
+# **Pipeline Overview**
+
+This pipeline processes single-cell RNA-seq data, integrating multiple datasets from Rhapsody while ensuring high-quality analysis. The main steps are:
+
+1. **Project Initialization**  
+   - Set up directories for raw data, results, and scripts.  
+   - Load required libraries and utility functions.
+
+2. **Data Loading and Preprocessing**  
+   - Import Seurat objects (`pci_index1`, `pci_index3`).  
+   - Filter cells based on QC metrics (e.g., mitochondrial contamination, gene count).  
+   - Visualize quality metrics using violin and scatter plots.
+
+3. **Normalization and Variable Gene Selection**  
+   - Normalize data using `LogNormalize`.  
+   - Identify highly variable features for downstream analysis.
+
+4. **Dimensionality Reduction**  
+   - Perform PCA for initial dimensionality reduction.  
+
+5. **Integration Methods**  
+   - Apply various integration techniques:
+     - **CCA (Canonical Correlation Analysis)**
+     - **RPCA (Reciprocal PCA)**
+     - **Harmony**
+     - **Seurat v5 Multi-layer Integration**
+   - Evaluate integration quality using metrics such as iLISI and cLISI.
+
+6. **Visualization and Results**  
+   - Generate UMAP/t-SNE plots for each method.  
+   - Save integrated datasets (`pci_integrated_harmony.rds`, `pci1_3_combined_s5.rds`).  
+   - Compare integration performance across methods using iLISI and cLISI scores.
+
+Feel free to adapt this pipeline based on specific dataset requirements or research questions.
+
+
+<!--  Setting up global markdown environment -->
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, eval= TRUE, warning = FALSE, message = FALSE, prompt = FALSE, include = TRUE, cache = TRUE, cache.lazy = FALSE)
+```
+
+<!--  Cleaning r environment -->
+
+```{r clean_env, include=FALSE}
+rm(list=ls())
+```
+
+# **Study design** {.tabset}
++ Here can be written a short description of the data.
++ Now we proceed to the preprocessing of counts using Seurat v5.0.3
+
+<!-- Organization: -->
+<!-- The project working directory should initially contain a RawData folder -->
+<!-- Additional folders will be created in the project working directory -->
+<!-- Savings of Seurat objects in the RDS format will be stored in a 01-Seurat folder -->
+<!-- Savings of results will be stored in a preprocessing_dir folder -->
+
+```{r path}
+# set a seed to re-produce pseudorandom numbers
+set.seed(99)
+
+# Définir le chemin du projet
+project_dir <- "/Users/lamine/INEM/Projets/Peter/Projet2/Pancreas_Cell_Immune"  # Remplacez par le chemin de votre projet
+
+# Créer le répertoire principal s'il n'existe pas déjà
+if (!dir.exists(project_dir)) {
+  dir.create(project_dir, recursive = TRUE)
+}
+
+# Créer les sous-dossiers pour les résultats et les scripts
+results_dir <- file.path(project_dir, "results")
+scripts_dir <- file.path(project_dir, "scripts")
+
+if (!dir.exists(results_dir)) {
+  dir.create(results_dir)
+}
+
+if (!dir.exists(scripts_dir)) {
+  dir.create(scripts_dir)
+}
+
+# Définir le répertoire de travail au répertoire du projet
+setwd(project_dir)
+
+# Vérifier le répertoire de travail actuel
+cat("Le répertoire de travail est maintenant:", getwd(), "\n")
+```
+
+
+```{r save_dir}
+preprocessing_dir <- file.path(results_dir, "03_Preprocessing_Results")
+integration_dir <- file.path(results_dir, "Integration_Results")
+
+if (!dir.exists(preprocessing_dir)) {
+  dir.create(preprocessing_dir)
+}
+
+if (!dir.exists(integration_dir)) {
+  dir.create(integration_dir)
+}
+
+```
+
+
+# **Importing libraries**
+<!-- Loading useful libraries and control version  -->
+
+```{r librairies}
+# Exemple d'utilisation
+utils_path <- file.path(project_dir, "/scripts/utils.R")
+ # Créer un nouvel environnement pour charger les fonctions
+script_env <- new.env()
+# Charger les fonctions dans cet environnement
+if (exists("script_env") && is.environment(script_env)) {
+  source(utils_path, local = script_env)
+  cat("The functions available in Utils R file and their description are :\n\n")
+  # Afficher les noms des fonctions disponibles avec une brève description
+  #cat(sprintf("The functions available in Utils R file are: %s \n", paste(lsf.str(envir = script_env), collapse = ", ")))
+  print(lsf.str(envir = script_env))
+  cat("\n")
+} else {
+  cat("The 'script_env' doesn't exist or is not valid.\n")
+}
+
+# Utiliser les fonctions définies dans utils.R
+# Liste des packages CRAN
+packages <- c('dplyr', 'ggplot2', 'ggpubr', 'ggrepel', 'patchwork', 'plotly', 'rstudioapi', 'scales', 'Seurat', 'tidyverse', 'devtools', 'BiocManager', 'cowplot','harmony')
+script_env$install_and_load(packages)
+
+# Liste des packages GitHub et leurs noms de chargement
+dev_packages <- c('satijalab/seurat-data', 'satijalab/azimuth', 'mojaveazure/seurat-disk', 'satijalab/seurat-wrappers', 'chris-mcginnis-ucsf/DoubletFinder', 
+                  'immunogenomics/lisi', 'SGDDNB/ShinyCell')
+pkg.name <- c('SeuratData', 'Azimuth', 'SeuratDisk', 'SeuratWrappers', 'DoubletFinder', 'lisi', 'ShinyCell')
+script_env$install_and_load_dev(pkg = dev_packages, pkg_names = pkg.name)
+```
+
+
+# **Data import**
+
+This part is done for one dataset until integration. If you have many you can repeat thois or use a list. 
+
+```{r load_data}
+# Load the Seurat objects as demo_seurat_1 and demo_seurat_2
+pci_index3 <- readRDS(paste0(project_dir, '/data/Pancreas-cell-immune-Index3_Seurat.rds'))
+```
+
+
+```{r display_load_data}
+pci_index3
+```
+
+
+```{r genes_expr}
+# Lets examine a few genes in the first thirty cells
+pci_index3@assays$RNA$data[c("Ppy", "Ins1", "Gcg", "Sst", "Ide"), 1:30]
+```
+:::comment
+Here we will only consider cells with at least 200 detected genes and genes need to be expressed in at least 3 cells.
+:::
+
+```{r}
+table(pci_index3$Sample_Name)
+```
+
+# **Data preprocessing**
+
+<!-- Additional filters can help removing multiplets and low quality cells -->
+<!-- For multiplets, remove "cells" expressing a high number of genes (nFeature_RNA) and/or having a high number of UMI (nCount_RNA) -->
+<!-- For low quality cells, removes those with a high % of mitochondrial contamination (percent.mt) -->
+
+ + First let's remove the Multiplet and Undetermined in the data.
+ 
+```{r}
+cat(sprintf("The current Idents levels are:\n%s\n", 
+            paste(levels(Idents(pci_index3)), collapse = "\n")), "\n")
+# Changer les Idents par defauts
+pci_index3 <- SetIdent(pci_index3, value = "Sample_Name")
+
+cat(sprintf("The new Idents levels are:\n%s\n", 
+            paste(levels(Idents(pci_index3)), collapse = "\n")))
+
+```
+ 
+ 
+```{r}
+# Filtrer l'objet Seurat
+pci_index3_1 <- subset(pci_index3, subset = Sample_Name != "Multiplet" & Sample_Name != "Undetermined")
+
+cat(sprintf("The number of current features and cells are respectively : (%s Genes) and (%s Cells)\n", dim(pci_index3)[1], dim(pci_index3)[2]), "\n")
+ 
+cat(sprintf("The number of new features and cells after removing Undetermined and Multiplet are respectively : (%s Genes) and (%s Cells)\n", dim(pci_index3_1)[1], dim(pci_index3_1)[2]), "\n")
+# Vérifiez les échantillons après filtrage
+table(pci_index3_1$Sample_Name)
+```
+
+
+
+```{r}
+# run garbage collect to free up memory
+gc()
+```
+
+
+## **QC metrics calculation and visualization**
+
+### QC metrics calculation
+
+<!-- Add a QC parameter: the % of mitochondrial contamination -->
+
+```{r MT}
+# Mitochondrial
+pci_index3_1 <- Seurat::PercentageFeatureSet(pci_index3_1,
+                             pattern = "^mt-",
+                             col.name = "percent.mt") 
+
+head(pci_index3_1@meta.data, 5)
+```
+
+
+
+```{r MT_plot}
+p1 <- Seurat::VlnPlot(pci_index3_1, 
+                      features = "percent.mt")
+pdf(paste0(preprocessing_dir,"/MT.pdf"), width = 10, height = 5)
+print(p1)
+dev.off()
+# Afficher le plot dans la console R
+p1
+```
+
+
+### QC metrics visualization
+
+<!-- Violin plots: number of genes detected, number of UMI, % of mitochondrial contamination -->
+
+```{r Nfeature_Vlnplot}
+# Visualize QC metrics as a violin plot
+p2 <- script_env$visViolin(pci_index3_1, thresould = 50)
+# pdf(paste0(preprocessing_dir,"/violin_QC.pdf"), width = 10, height = 5)
+# print(p2)
+# dev.off()
+# Afficher le plot dans la console R
+p2
+```
+
+```{r Nfeauture_Scaterplot}
+plot1 <- FeatureScatter(pci_index3_1, group.by = "Sample_Name", feature1 = "nCount_RNA", 
+                        feature2 = "percent.mt")
+plot2 <- FeatureScatter(pci_index3_1, group.by = "Sample_Name",feature1 = "nCount_RNA", 
+                        feature2 = "nFeature_RNA")
+pdf(paste0(preprocessing_dir,"/FeatureScatter_QC.pdf"), width = 10, height = 5)
+print(plot1 + plot2)
+dev.off()
+
+# Affichier les plots dans la console
+plot1 + plot2
+```
+
+```{r Nfeauture_Scaterplot1}
+ggplot(pci_index3_1@meta.data, aes(x = Putative_Cell_Algorithm, fill = Sample_Name)) +
+    geom_bar(position = "fill")
+```
+
+
+## **Filtering**
+
+:::comment
++ First, I tried importing the raw data without any filter and we then applied the recommended filters: genes detected in at least 3 cells and cells having more than 200 nonzero gene counts.
+
++ Extremely high number of detected genes could indicate doublets. However, depending on the cell type composition in your sample, you may have cells with higher number of genes (and also higher counts) from one cell type.
+
++Additionally, we can also see which genes contribute the most to such reads. We can for instance plot the percentage of counts per gene.
+:::
+
+```{r}
+# Compute the proportion of counts of each gene per cell 
+# Use sparse matrix operations, if your dataset is large, doing matrix devisions the regular way will take a very long time.
+GeneExpr_results <- script_env$visGene_expr(pci_index3_1, numGenes = 50)
+```
+
+As you can see, Gcg constitutes up to 40% of the UMIs from a single cell and the other top genes are mitochondrial and ribosomal genes. 
+
+```{r}
+t(head(GeneExpr_results$most_expressed, 10))
+```
+
+
+```{r}
+#Genes detected in at least 3 cells and cells having more than 200 nonzero gene counts
+selected_c <- WhichCells(pci_index3_1, expression = nFeature_RNA > 200)
+selected_f <- rownames(pci_index3_1)[Matrix::rowSums(pci_index3) > 3]
+
+pci_index3_1_filt <- subset(pci_index3_1, features = selected_f, cells = selected_c)
+cat(sprintf("The number of current features and cells are respectively : (%s Genes) and (%s Cells)\n", dim(pci_index3_1)[1], dim(pci_index3_1)[2]), "\n")
+ 
+cat(sprintf("The number of features and cells after Genes > 3 and Cells > 200 genes are respectively : (%s Genes) and (%s Cells)\n", dim(pci_index3_1_filt)[1], dim(pci_index3_1_filt)[2]), "\n")
+```
+
+```{r}
+script_env$visViolin(pci_index3_1_filt, thresould = 50)
+```
+
+:::comment
+The *FilterSeurat function* used to filter the data : 
+nFeature_RNA: Number of genes detected per cell
+Filters cells between the 1st and 99th percentile.
+Removes dead/empty cells (few genes) and doublets (too many genes).
+
+nCount_RNA: Total number of transcripts per cell
+Filters cells between the 1st and 99th percentile.
+Excludes low-quality cells and outliers.
+
+percent.mt: Percentage of mitochondrial transcripts
+Filters cells above the 95th percentile.
+Eliminates dying/stressed cells.
+
+:::
+
+
+```{r filtering}
+cat(sprintf("The number of current features (genes detected in at least 3 cells and cells having more than 200 nonzero gene counts) are respectively : (%s Genes) and (%s Cells)\n", dim(pci_index3_1_filt)[1], dim(pci_index3_1_filt)[2]), "\n")
+
+print(table(pci_index3_1_filt$Sample_Name))
+cat("\n")
+# Fonction pour déterminer les seuils de filtrage optimaux
+# Run filter fonction
+results_filt <- script_env$FilterSeurat(pci_index3_1_filt)
+pci_index3_1_filt <- results_filt$filtered_object
+
+cat(sprintf("The number of features and cells after quantile filtering are respectively : (%s Genes) and (%s Cells)\n", dim(pci_index3_1_filt)[1], dim(pci_index3_1_filt)[2]), "\n")
+print(table(pci_index3_1_filt$Sample_Name))
+cat("\n")
+
+cat(sprintf("Pourcentage de cellules conservées est de : %.2f%% \n", results_filt$percent_kept), "\n")
+```
+
+
+```{r}
+write.table(results_filt$filtering_stats, file = paste0(preprocessing_dir,"/filtering_stats.txt"))
+results_filt$filtering_stats
+```
+
+
+```{r}
+pdf(paste0(preprocessing_dir,"/violin_QC_before_filtered.pdf"), width = 10, height = 5)
+print(results_filt$plots_before)
+dev.off()
+pdf(paste0(preprocessing_dir,"/violin_QC_after_filtered.pdf"), width = 10, height = 5)
+print(results_filt$plots_after)
+dev.off()
+# Show plots 
+results_filt$plots_before
+results_filt$plots_after
+```
+
+
+## **Normalizing data**
+
+```{r Normalizing}
+pci_index3_1_filt <- pci_index3_1_filt %>%
+# The default normalization method “LogNormalize” normalizes the feature expression measurements
+# for each cell by the total expression, multiplies this by a scale factor (10,000 by default),
+# and log-transforms the result.
+  NormalizeData() %>%
+# Identification of highly variable features for feature selection
+# Calculation of a subset of features that exhibit high cell-to-cell variation in the dataset
+# (i.e, they are highly expressed in some cells, and lowly expressed in others).
+# Focusing on these genes in downstream analysis like PCA helps to highlight biological signal in single-cell datasets.
+  FindVariableFeatures(selection.method = "vst", nfeatures = 3000)
+```
+
+```{r Top10_Highly_variable}
+# Identify the 10 most highly variable genes
+cat(sprintf("The 20 highly variable features are: %s\n\n", paste(head(VariableFeatures(pci_index3_1_filt), 20), collapse = ", ")))
+```
+
+
+```{r Variablesfeatures_plot}
+# plot variable features with and without labels
+plot1 <- VariableFeaturePlot(pci_index3_1_filt)
+plot2 <- LabelPoints(plot = plot1, points = head(VariableFeatures(pci_index3_1_filt), 20), repel = TRUE)
+pdf(paste0(preprocessing_dir,"/VariableFeatures.pdf"), width = 10, height = 5)
+print(plot1 + plot2)
+dev.off()
+# Afficher les plots dans la console 
+plot1 + plot2
+```
+
+
+## **Scaling**
+
+```{r Scaling}
+# Shifts the expression of each gene, so that the mean expression across cells is 0
+# Scales the expression of each gene, so that the variance across cells is 1
+# This step gives equal weight in downstream analyses, so that highly-expressed genes do not dominate
+pci_index3_1_filt <- ScaleData(object = pci_index3_1_filt, features = rownames(pci_index3_1_filt))
+```
+
+<!-- ## **Exclude non-informative patient-specific genes from variable genes** -->
+
+<!-- <!-- Variable genes will be used for the dimension reduction so excluding non-informative specific genes helps removing batch effects --> -->
+
+<!-- ```{r, include=FALSE} -->
+<!-- var.genes <- VariableFeatures(pci_index3) -->
+<!-- #print(paste("IG genes found variable :", paste(var.genes[grep("^IG", var.genes, perl=TRUE)], collapse=" "))) -->
+<!-- print(paste("IG genes found variable :", paste(var.genes[grep("^IGK|^IGH|^IGL|^IGJ|^IGS|^IGD|IGFN1", var.genes, perl=TRUE)], collapse=" "))) #10 -->
+<!-- print(paste("TCR genes found variable :", paste(var.genes[grep("^TRA|^TRB|^TRG", var.genes, perl=TRUE)], collapse=" "))) #33 -->
+<!-- print(paste("Ribosome-protein-coding genes found variable :", paste(var.genes[grep("^RP([0-9]+-|[LS])", var.genes, perl=TRUE)], collapse=" "))) #1 -->
+
+<!-- idx_ig <- grep("^IGK|^IGH|^IGL|^IGJ|^IGS|^IGD|IGFN1", var.genes, perl = TRUE) -->
+<!-- idx_tcr <- grep("^TRA|^TRB|^TRG", var.genes, perl = TRUE) -->
+<!-- idx_rib <- grep("^RP([0-9]+-|[LS])", var.genes, perl = TRUE) -->
+
+<!-- excl.var.genes <- var.genes[-c(idx_ig, idx_tcr, idx_rib)] #1956 variable genes remaining -->
+<!-- ``` -->
+
+<!-- :::comment -->
+<!-- :::+ IG genes found variable: -->
+<!-- :::+ TCR genes found variable: -->
+<!-- :::+ Ribosome-protein-coding genes found variable: -->
+<!-- ::: -->
+
+## **Dimension reduction**
+
+### Linear dimensional reduction: PCA
+
+```{r RunPca}
+pci_index3_1_filt <- RunPCA(object = pci_index3_1_filt, features = VariableFeatures(object = pci_index3_1_filt))
+#pci_index3_1_filt <- RunPCA(object = pci_index3_1_filt, features = excl.var.genes)
+
+DimPlot(object = pci_index3_1_filt, reduction = "pca", shuffle = TRUE) +
+  ggtitle("")
+
+```
+
+```{r Pca_features}
+print(pci_index3_1_filt[["pca"]], dims = 1:5, nfeatures = 10)
+```
+
+
+
+```{r Pca_Dimplot}
+DimPlot(pci_index3_1_filt, reduction = "pca")
+```
+
+```{r PCA1_Dimheatmap_plot}
+#In particular DimHeatmap() allows for easy exploration of the primary sources of heterogeneity in a dataset, and can be useful #when trying to decide which PCs to include for further downstream analyses. Both cells and features are ordered according to #their PCA scores. Setting cells to a number plots the ‘extreme’ cells on both ends of the spectrum, which dramatically speeds #plotting for large datasets. Though clearly a supervised analysis, we find this to be a valuable tool for exploring correlated #feature sets.
+#pdf(paste0(preprocessing_dir,"/DimHeatmap_pc1.pdf"), width = 10, height = 5)
+DimHeatmap(pci_index3_1_filt, dims = 1:5, cells = 500, balanced = TRUE)
+```
+
+
+<!---- Determine the ‘dimensionality’ of the dataset ---->
+
+```{r Elbow_plot}
+elbow <- ElbowPlot(object = pci_index3_1_filt) + ggtitle("")
+ggsave(plot = elbow, filename = "elbow.png",
+       path = preprocessing_dir, width=7, height=4)
+elbow
+```
+
+### Perform non-linear dimensional reduction: tSNE and UMAP 
+
+
+```{r RunUmap}
+# If you haven't installed UMAP, you can do so via reticulate::py_install(packages = 'umap-learn')
+pci_index3_1_filt <- pci_index3_1_filt %>%
+  RunTSNE(dims = 1:20, check_duplicates = FALSE) %>%
+  RunUMAP(dims = 1:20)
+```
+
+```{r Umap_cluster}
+DimPlot(pci_index3_1_filt, reduction = "umap") +
+                      ggtitle("Pancreatic Cell IMMUNE - UMAP by Cluster")
+```
+
+
+```{r Tsne_cluster}
+DimPlot(pci_index3_1_filt, reduction = "tsne") +
+                      ggtitle("Pancreatic Cell IMMUNE - TSNE by Cluster")
+```
+
+
+## Find doublets with DoubletFinder
+
+Implementation Details
+Calculates doublet rate based on dataset cell count.
+Uses computed rate as a reference for DoubletFinder simulation.
+
+Outcome: 
+
+Enhanced dataset quality by identifying and annotating doublets.
+Prevents misinterpretation of doublets as biologically significant cell types or clusters
+
+BD Rhapsody Doublet Rates:
+A linear model was constructed to predict doublet rates for datasets.
+
+
+
+```{r}
+# BD provided doublet rates with different cell load numbers
+rhapsody_doublet_rate <- data.frame(
+                         "cell_num" = c(100,500,1000*(1:20)), 
+                         "rate" = c(0, 0.1, 0.2, 0.5, 0.7, 1, 
+                                    1.2, 1.4, 1.7, 1.9, 2.1, 
+                                    2.4, 2.6, 2.8, 3.1, 3.3, 
+                                    3.5, 3.8, 4, 4.2, 4.5 , 4.7))
+
+# Build a linear model to calculate theoretical doublet rate
+model_rhap <- lm(rate ~ cell_num, 
+                 rhapsody_doublet_rate)
+
+# use function to find doublets
+pci_index3_1_filt <- script_env$detect_doublets(pci_index3_1_filt, est_doublet_model = model_rhap, pc = 1:20,
+                            reuse.results = FALSE)
+
+```
+
+
+```{r}
+cat(sprintf("The number of Doublet and Singlet cells detected are following : (%s Doublet) and (%s Singlet)", table(pci_index3_1_filt$doublet_check)[[1]], 
+            table(pci_index3_1_filt$doublet_check)[[2]]), "\n")
+
+```
+
+
+```{r}
+wrap_plots(
+    DimPlot(pci_index3_1_filt, 
+            group.by = "Sample_Name") + NoAxes(),
+    DimPlot(pci_index3_1_filt, 
+                    group.by = "doublet_check") + NoAxes(),
+    ncol = 2
+)
+```
+
+```{r}
+visDoublet <- function(obj, thresould = 50) {
+  p1 <- VlnPlot(obj, features = "nFeature_RNA", , group.by = "doublet_check") + NoLegend() + labs(title = "", x = "", y = "nGenes")
+  p2 <- DimPlot(obj, 
+                    group.by = "doublet_check") + NoAxes()
+  p3 <- FeaturePlot(obj, features = "pANN_0.25_0.005_600") +
+    scale_color_gradient(low = "blue", high = "red") +
+    ggtitle("UMAP Plot of Doublet Scores")
+  cowplot::plot_grid(p1, p2, p3, ncol = 3)
+}
+
+pdf(paste0(preprocessing_dir,"/violin_doublet.pdf"), width = 10, height = 5)
+print(visDoublet(pci_index3_1_filt))
+dev.off()
+visDoublet(pci_index3_1_filt)
+```
+
+
+```{r}
+# Filter cells based on doublet score threshold
+pci_index3_1_filt_done <- subset(pci_index3_1_filt, subset = doublet_check == "Singlet")
+  
+dim(pci_index3_1_filt)
+```
+
+```{r}
+saveRDS(pci_index3_1_filt_done, file = paste0(project_dir, "/data/pci_index3_filtered.rds"))
+```
+
+
+# Data integration
+
+
+```{r save_dir}
+preprocessing_integrated_dir_dir <- file.path(integration_dir, "Preprocessing_Results")
+
+if (!dir.exists(preprocessing_integrated_dir_dir)) {
+  dir.create(preprocessing_integrated_dir_dir)
+}
+
+```
+
+
+```{r}
+pci_index3_1_filt_done <- readRDS(paste0(project_dir, '/data/pci_index3_filtered.rds'))
+pci_index1_1_filt_done <- readRDS(paste0(project_dir, '/data/pci_index1_filtered.rds'))
+
+cat(sprintf("The dimension of the 2 index are following : %s, %s genes for index1 and index3 respectively and  %s, %s Cells for index1 and index3 respectively ", 
+             dim(pci_index1_1_filt_done)[1], dim(pci_index3_1_filt_done)[1], dim(pci_index1_1_filt_done)[2], dim(pci_index3_1_filt_done)[2]), "\n")
+```
+
+## Integration method 
+
+```{r}
+Seurat::Project(pci_index1_1_filt_done) <- "PCI1"
+Seurat::Project(pci_index3_1_filt_done) <- "PCI3"
+pci_index1_1_filt_done$orig.ident <- "PCI1"
+pci_index3_1_filt_done$orig.ident <- "PCI3"
+# 1. Méthode CCA (Canonical Correlation Analysis) - Seurat v3
+# C'est la méthode "classique" de Seurat
+seurat.list <- list(pci_index1_1_filt_done, pci_index3_1_filt_done)
+features <- SelectIntegrationFeatures(object.list = seurat.list)
+anchors <- FindIntegrationAnchors(object.list = seurat.list, 
+                                 anchor.features = features,
+                                 reduction = "cca")
+combined.cca <- IntegrateData(anchorset = anchors)
+
+# Traitement standard après intégration
+DefaultAssay(combined.cca) <- "integrated"
+combined.cca <- ScaleData(combined.cca)
+combined.cca <- RunPCA(combined.cca)
+ElbowPlot(object = combined.cca)
+combined.cca <- combined.cca %>%
+  RunTSNE(dims = 1:20, check_duplicates = FALSE) %>%
+  RunUMAP(dims = 1:20)
+
+# 2. Méthode RPCA (Reciprocal PCA) - Alternative dans Seurat
+anchors.rpca <- FindIntegrationAnchors(object.list = seurat.list,
+                                      dims = 1:20,
+                                      reduction = "rpca",
+                                      anchor.features = features)
+combined.rpca <- IntegrateData(anchorset = anchors.rpca)
+
+# Traitement standard après intégration
+DefaultAssay(combined.rpca) <- "integrated"
+combined.rpca <- ScaleData(combined.rpca)
+combined.rpca <- RunPCA(combined.rpca)
+ElbowPlot(object = combined.rpca)
+combined.rpca <- combined.rpca %>%
+  RunTSNE(dims = 1:20, check_duplicates = FALSE) %>%
+  RunUMAP(dims = 1:20)
+
+# 3. Méthode Harmony
+# D'abord, merger les données sans intégration
+pci1_3_merged <- merge(pci_index1_1_filt_done, y = pci_index3_1_filt_done, 
+                 add.cell.ids = c("pci1", "pci3"), 
+                 project = "PCI")
+
+# Prétraitement standard
+pci1_3_merged <- NormalizeData(pci1_3_merged)
+pci1_3_merged <- FindVariableFeatures(pci1_3_merged, nfeatures = 3000)
+pci1_3_merged <- ScaleData(pci1_3_merged)
+pci1_3_merged <- RunPCA(pci1_3_merged)
+
+# Appliquer Harmony
+combined.harmony <- RunHarmony(pci1_3_merged, 
+                             group.by.vars = "orig.ident",
+                             dims.use = 1:20) %>%
+  RunTSNE(reduction="harmony", dims = 1:20, check_duplicates = FALSE) %>%
+  RunUMAP(reduction="harmony", dims = 1:20)
+
+```
+
+
+```{r}
+# Visualisation et comparaison des résultats
+# Fonction pour visualiser les résultats
+
+pdf(paste0(preprocessing_integrated_dir,"/umap_cca.pdf"), width = 15, height = 5)
+print(script_env$PlotIntegrationResults(combined.cca, "umap", "CCA"))
+dev.off()
+script_env$PlotIntegrationResults(seurat_obj = combined.cca, reduction = "umap", title = "CCA")
+```
+
+```{r}
+pdf(paste0(preprocessing_integrated_dir,"/umap_rpca.pdf"), width = 15, height = 5)
+print(script_env$PlotIntegrationResults(combined.rpca, "umap", "RPCA"))
+dev.off()
+script_env$PlotIntegrationResults(combined.rpca, "umap", "RPCA")
+```
+
+
+```{r}
+pdf(paste0(preprocessing_integrated_dir,"/umap_harmony.pdf"), width = 15, height = 5)
+print(script_env$PlotIntegrationResults(combined.harmony, "umap", "Harmony"))
+dev.off()
+script_env$PlotIntegrationResults(combined.harmony, "umap", "Harmony")
+```
+ 
+### Evaluation Criteria
+
+Integration LISI (iLISI): 
+Measures how well different datasets are mixed in the integrated embedding
+Represents the effective number of datasets in a neighborhood
+A neighborhood with only one dataset gets an iLISI of 1
+A neighborhood with equal numbers of cells from 2 datasets gets an iLISI of 2
+Even in ideal mixing, iLISI might be less than 2 if datasets have different cell numbers
+
+Cell-type LISI (cLISI): 
+Assesses the accuracy of cell type separation in the integrated embedding
+Ideal integration should maintain a cLISI of 1
+A cLISI of 1 indicates that cell types are distinctly separated throughout the embedding
+A cLISI of 2 suggests an erroneous embedding where different cell types are being grouped together
+
+
+These LISI (Local Inverse Simpson's Index) metrics provide quantitative ways to evaluate how well a data integration method:
+
+Mixes cells from different datasets (iLISI)
+
+Preserves cell type identities (cLISI)
+
+
+```{r}
+# Évaluation de la qualité d'intégration
+# Comparer les scores pour chaque méthode
+integration_scores <- list(
+    CCA = script_env$compute_integration_metrics(combined.cca),
+    RPCA = script_env$compute_integration_metrics(combined.rpca),
+    Harmony = script_env$compute_integration_metrics(combined.harmony)
+)
+```
+
+
+```{r}
+batch_key = "orig.ident"
+# 2. Calcul de l'écart-type des scores LISI pour chaque méthode
+lisi_variability <- sapply(integration_scores, function(x) {
+  sd(x$lisi_scores[[batch_key]], na.rm = TRUE)
+})
+
+# Affichage des écarts-types
+print("Écart-type des scores LISI par méthode d'intégration :")
+print(lisi_variability)
+
+# 3. Vérification des scores LISI par lot pour chaque méthode
+
+# Extraire les scores LISI pour chaque méthode et chaque lot
+script_env$plot_integration_metrics_lot(integration_scores, batch_key = "orig.ident")
+# 4. Affichage des résultats moyens des scores LISI
+cat("Moyenne des scores LISI pour chaque méthode d'intégration :\n")
+cat(paste("CCA : ", integration_scores$CCA$mean_lisi, "\n"))
+cat(paste("RPCA : ", integration_scores$RPCA$mean_lisi, "\n"))
+cat(paste("Harmony : ", integration_scores$Harmony$mean_lisi, "\n"))
+```
+
+The lowest standard deviation (most consistent performance)
+
+CCA : 0.1895687
+RPCA : 0.1717766
+Harmony : 0.1759565
+
+The highest mean values:
+
+CCA : 1.83728130956071
+RPCA : 1.85512703425548
+- Harmony : 1.84929601173755
+
+```{r}
+saveRDS(combined.harmony, file = paste0(project_dir, "/data/pci_integrated_harmony.rds"))
+```
+
+## Seurat version 5
+
+In previous versions of Seurat, we would require the data to be represented as nine different Seurat objects. When using Seurat v5 assays, we can instead keep all the data in one object, but simply split the layers. We can also run a standard scRNA-seq analysis (i.e. without integration). Note that since the data is split into layers, normalization and variable feature identification is performed for each batch independently (a consensus set of variable features is automatically identified).
+
+```{r}
+pci1_3_combined <- merge(pci_index1_1_filt_done, y = pci_index3_1_filt_done, 
+                 add.cell.ids = c("pci1", "pci3"), 
+                 project = "PCI")
+
+#pci1_3_combined[["RNA"]] <- SeuratObject:::JoinLayers(pci1_3_combined[["RNA"]])
+
+pci1_3_combined[["RNA"]] <- split(pci1_3_combined[["RNA"]], f = pci1_3_combined$orig.ident)
+
+# Prétraitement standard
+pci1_3_combined <- NormalizeData(pci1_3_combined)
+pci1_3_combined <- FindVariableFeatures(pci1_3_combined, nfeatures = 3000)
+pci1_3_combined <- ScaleData(pci1_3_combined)
+pci1_3_combined <- RunPCA(pci1_3_combined)
+
+```
+
+
+```{r}
+pci1_3_combined <- IntegrateLayers(
+  object = pci1_3_combined, method = CCAIntegration,
+  orig.reduction = "pca", new.reduction = "integrated.cca",
+  verbose = FALSE
+)
+options(future.globals.maxSize = 8 * 1024^3)  # 8 Go
+pci1_3_combined <- IntegrateLayers(
+  object = pci1_3_combined, method = RPCAIntegration,
+  orig.reduction = "pca", new.reduction = "integrated.rpca",
+  verbose = FALSE
+)
+pci1_3_combined <- IntegrateLayers(
+  object = pci1_3_combined, method = HarmonyIntegration,
+  orig.reduction = "pca", new.reduction = "harmony",
+  verbose = FALSE
+)
+pci1_3_combined <- IntegrateLayers(
+  object = pci1_3_combined, method = FastMNNIntegration,
+  new.reduction = "integrated.mnn",
+  verbose = FALSE
+)
+```
+
+
+```{r}
+pci1_3_combined <- pci1_3_combined %>% 
+  RunTSNE(reduction="integrated.cca", dims = 1:20, check_duplicates = FALSE, reduction.name = "tsne.cca") %>%
+  RunUMAP(reduction="integrated.cca", dims = 1:20, reduction.name = "umap.cca")
+pci1_3_combined <- pci1_3_combined %>% 
+  RunTSNE(reduction="integrated.rpca", dims = 1:20, check_duplicates = FALSE, reduction.name = "tsne.rpca") %>%
+  RunUMAP(reduction="integrated.rpca", dims = 1:20, reduction.name = "umap.rpca")
+pci1_3_combined <- pci1_3_combined %>% 
+  RunTSNE(reduction="harmony", dims = 1:20, check_duplicates = FALSE, reduction.name = "tsne.harmony") %>%
+  RunUMAP(reduction="harmony", dims = 1:20, reduction.name = "umap.harmony")
+pci1_3_combined <- pci1_3_combined %>% 
+  RunTSNE(reduction="integrated.mnn", dims = 1:20, check_duplicates = FALSE, reduction.name = "tsne.mnn") %>%
+  RunUMAP(reduction="integrated.mnn", dims = 1:20, reduction.name = "umap.mnn")
+```
+
+
+```{r}
+pdf(paste0(preprocessing_integrated_dir,"/umap_integrated_cca.pdf"), width = 15, height = 5)
+print(script_env$PlotIntegrationResults(pci1_3_combined, "umap.cca", "integrated_cca"))
+dev.off()
+script_env$PlotIntegrationResults(seurat_obj = pci1_3_combined, reduction = "umap.cca", title = "integrated_cca")
+```
+
+
+
+```{r}
+pdf(paste0(preprocessing_integrated_dir,"/umap_integrated.rpca.pdf"), width = 15, height = 5)
+print(script_env$PlotIntegrationResults(pci1_3_combined, "umap.rpca", "integrated.rpca"))
+dev.off()
+script_env$PlotIntegrationResults(seurat_obj = pci1_3_combined, reduction = "umap.rpca", title = "integrated.rpca")
+```
+
+
+
+```{r}
+pdf(paste0(preprocessing_integrated_dir,"/umap_integrated.mnn.pdf"), width = 15, height = 5)
+print(script_env$PlotIntegrationResults(pci1_3_combined, "umap.mnn", "integrated.mnn"))
+dev.off()
+script_env$PlotIntegrationResults(seurat_obj = pci1_3_combined, reduction = "umap.mnn", title = "integrated.mnn")
+```
+
+
+```{r}
+pdf(paste0(preprocessing_integrated_dir,"/umap_integrated_harmony.pdf"), width = 15, height = 5)
+print(script_env$PlotIntegrationResults(pci1_3_combined, "umap.harmony", "integrated_harmony"))
+dev.off()
+script_env$PlotIntegrationResults(seurat_obj = pci1_3_combined, reduction = "umap.harmony", title = "integrated_harmony")
+```
+
+```{r}
+# Comparer les scores pour chaque méthode
+integration_scores_s5 <- list(
+    CCA = script_env$compute_integration_metrics(pci1_3_combined, reduction = "umap.cca"),
+    RPCA = script_env$compute_integration_metrics(pci1_3_combined, reduction = "umap.rpca"),
+    MNN = script_env$compute_integration_metrics(pci1_3_combined, reduction = "umap.mnn"),
+    Harmony = script_env$compute_integration_metrics(pci1_3_combined, reduction = "umap.harmony")
+)
+str(integration_scores_s5)
+```
+
+
+```{r}
+batch_key = "orig.ident"
+# 2. Calcul de l'écart-type des scores LISI pour chaque méthode
+lisi_variability <- sapply(integration_scores_s5, function(x) {
+  sd(x$lisi_scores[[batch_key]], na.rm = TRUE)
+})
+
+# Affichage des écarts-types
+print("Écart-type des scores LISI par méthode d'intégration (Une faible variabilité signifie une meilleure consistance des résultats d'intégration.) :")
+print(lisi_variability)
+
+# 4. Affichage des résultats moyens des scores LISI
+cat("Moyenne des scores LISI pour chaque méthode d'intégration (Plus la moyenne est haute, mieux l'intégration est réalisée) :\n")
+cat(paste("CCA : ", integration_scores_s5$CCA$mean_lisi, "\n"))
+cat(paste("RPCA : ", integration_scores_s5$RPCA$mean_lisi, "\n"))
+cat(paste("MNN : ", integration_scores_s5$MNN$mean_lisi, "\n"))
+cat(paste("Harmony : ", integration_scores_s5$Harmony$mean_lisi, "\n"))
+#plot les lots 
+script_env$plot_integration_metrics_lot(lisi_integration_scores = integration_scores_s5, batch_key = "orig.ident")
+```
+
+
+```{r}
+saveRDS(pci1_3_combined, file = paste0(project_dir, "/data/pci1_3_combined_s5.rds"))
+```
+
+
+```{r}
+DimPlot(pci_index1_1_filt_done, reduction = "umap", split.by = "Sample_Name", ncol = 2)
+DimPlot(pci_index3_1_filt_done, reduction = "umap", split.by = "Sample_Name", ncol = 2)
+DimPlot(pci1_3_combined, reduction = "umap.cca", split.by = "Sample_Name", ncol = 2)
+```
+
+
+```{r}
+DimPlot(pci_index1_1_filt_done, reduction = "umap", split.by = "Sample_Name", ncol = 2)
+DimPlot(pci_index3_1_filt_done, reduction = "umap", split.by = "Sample_Name", ncol = 2)
+DimPlot(combined.harmony, reduction = "umap", split.by = "Sample_Name", ncol = 2)
+DimPlot(pci1_3_combined, reduction = "umap.harmony", split.by = "Sample_Name", ncol = 2)
+```
+
+
+```{r Nfeauture_Scaterplot1}
+ggplot(pci1_3_combined@meta.data, aes(x = orig.ident, fill = Sample_Name)) +
+    geom_bar()
+```
+
+:::comment
+The End !
+:::
+
+
