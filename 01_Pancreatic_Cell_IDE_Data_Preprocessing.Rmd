@@ -1,11 +1,11 @@
 ---
-title: "Single Cell RNA-seq analysis, preprocessing step for Pancreatic_Cell_IDE"
+title: "Single Cell RNA-seq analysis, preprocessing step for Rhapsody"
+author: "Lamine TOURE"
+date: "`r Sys.Date()`"
 output: 
-  html_document: 
+  html_document:
     fig_caption: yes
     toc: true
-date: "`r Sys.Date()`"
-author: Lamine TOURE
 ---
 
 <!--  Setting up global markdown environment -->
@@ -24,76 +24,117 @@ rm(list=ls())
 + Here can be written a short description of the data.
 + Now we proceed to the preprocessing of counts using Seurat v5.0.3
 
-# **Importing libraries**
-<!-- Loading useful libraries -->
-
-```{r librairies}
-library(Seurat) # https://satijalab.org/seurat/articles/pbmc3k_tutorial.html
-library(SeuratData)   #devtools::install_github('satijalab/seurat-data')
-library(Azimuth)   #devtools::install_github("satijalab/azimuth", "seurat5")
-library(SeuratDisk)  #devtools::install_github("mojaveazure/seurat-disk")
-library(ggplot2)
-library(ggrepel)
-library(ggpubr)
-library(tidyverse)
-library(plotly)
-library(patchwork)
-library(Matrix)
-library(SeuratWrappers) #remotes::install_github('satijalab/seurat-wrappers')
-```
-
-# **Data import**
-
 <!-- Organization: -->
 <!-- The project working directory should initially contain a RawData folder -->
 <!-- Additional folders will be created in the project working directory -->
 <!-- Savings of Seurat objects in the RDS format will be stored in a 01-Seurat folder -->
-<!-- Savings of results will be stored in a saveTo folder -->
+<!-- Savings of results will be stored in a preprocessing_dir folder -->
+
 ```{r path}
 # set a seed to re-produce pseudorandom numbers
 set.seed(99)
 
-# Obtain the path of this rmarkdown file and assign it to object "get_path"
-get_path <- dirname(rstudioapi::getSourceEditorContext()$path)
+# Définir le chemin du projet
+project_dir <- "/Users/lamine/INEM/Projets/Peter/Projet2/Pancreas_Cell_Immune"  # Remplacez par le chemin de votre projet
 
-# Set "get_path" as Working Directory
-setwd(get_path)
+# Créer le répertoire principal s'il n'existe pas déjà
+if (!dir.exists(project_dir)) {
+  dir.create(project_dir, recursive = TRUE)
+}
 
-# Create Output dir
-dir.create("01-Pancreatic Cell IDE output", showWarnings = FALSE)
-# Save images and data to this folder
-dir.create("01-Pancreatic Cell IDE output/01-Preprocessing_Results", showWarnings = FALSE)
-dir.create("01-Pancreatic Cell IDE output/02-Annotation_Results", showWarnings = FALSE)
-saveTo <- paste0(get_path,"/01-Pancreatic Cell IDE output/01-Preprocessing_Results")
-saveAnnot <- paste0(get_path,"/01-Pancreatic Cell IDE output/02-Annotation_Results")
+# Créer les sous-dossiers pour les résultats et les scripts
+results_dir <- file.path(project_dir, "results")
+scripts_dir <- file.path(project_dir, "scripts")
+
+if (!dir.exists(results_dir)) {
+  dir.create(results_dir)
+}
+
+if (!dir.exists(scripts_dir)) {
+  dir.create(scripts_dir)
+}
+
+# Définir le répertoire de travail au répertoire du projet
+setwd(project_dir)
+
+# Vérifier le répertoire de travail actuel
+cat("Le répertoire de travail est maintenant:", getwd(), "\n")
 ```
 
 
+```{r save_dir}
+preprocessing_dir <- file.path(results_dir, "03_Preprocessing_Results")
+integration_dir <- file.path(results_dir, "Integration_Results")
+
+if (!dir.exists(preprocessing_dir)) {
+  dir.create(preprocessing_dir)
+}
+
+if (!dir.exists(integration_dir)) {
+  dir.create(integration_dir)
+}
+
+```
+
+
+# **Importing libraries**
+<!-- Loading useful libraries and control version  -->
+
+```{r librairies}
+# Exemple d'utilisation
+utils_path <- file.path(project_dir, "/scripts/utils.R")
+ # Créer un nouvel environnement pour charger les fonctions
+script_env <- new.env()
+# Charger les fonctions dans cet environnement
+if (exists("script_env") && is.environment(script_env)) {
+  source(utils_path, local = script_env)
+  cat("The functions available in Utils R file and their description are :\n\n")
+  # Afficher les noms des fonctions disponibles avec une brève description
+  #cat(sprintf("The functions available in Utils R file are: %s \n", paste(lsf.str(envir = script_env), collapse = ", ")))
+  print(lsf.str(envir = script_env))
+  cat("\n")
+} else {
+  cat("The 'script_env' doesn't exist or is not valid.\n")
+}
+
+# Utiliser les fonctions définies dans utils.R
+# Liste des packages CRAN
+packages <- c('dplyr', 'ggplot2', 'ggpubr', 'ggrepel', 'patchwork', 'plotly', 'rstudioapi', 'scales', 'Seurat', 'tidyverse', 'devtools', 'BiocManager', 'cowplot','harmony')
+script_env$install_and_load(packages)
+
+# Liste des packages GitHub et leurs noms de chargement
+dev_packages <- c('satijalab/seurat-data', 'satijalab/azimuth', 'mojaveazure/seurat-disk', 'satijalab/seurat-wrappers', 'chris-mcginnis-ucsf/DoubletFinder', 
+                  'immunogenomics/lisi', 'SGDDNB/ShinyCell')
+pkg.name <- c('SeuratData', 'Azimuth', 'SeuratDisk', 'SeuratWrappers', 'DoubletFinder', 'lisi', 'ShinyCell')
+script_env$install_and_load_dev(pkg = dev_packages, pkg_names = pkg.name)
+```
+
+
+# **Data import**
+
+This part is done for one dataset until integration. If you have many you can repeat thois or use a list. 
+
 ```{r load_data}
-# Choose a folder/experiment to analyse
-exp1 <- "/Users/lamine/INEM/Projets/Peter/Data/"
-
 # Load the Seurat objects as demo_seurat_1 and demo_seurat_2
-pancreatic.cell.ide <- readRDS('/Users/lamine/INEM/Projets/Peter/Data/Pancreatic-Cell-IDE_Seurat.rds')
-
+pci_index3 <- readRDS(paste0(project_dir, '/data/Pancreas-cell-immune-Index3_Seurat.rds'))
 ```
 
 
 ```{r display_load_data}
-pancreatic.cell.ide
+pci_index3
 ```
 
 
 ```{r genes_expr}
 # Lets examine a few genes in the first thirty cells
-pancreatic.cell.ide@assays$RNA$data[c("Ppy", "Ins1", "Gcg", "Sst", "Ide"), 1:30]
+pci_index3@assays$RNA$data[c("Ppy", "Ins1", "Gcg", "Sst", "Ide"), 1:30]
 ```
 :::comment
 Here we will only consider cells with at least 200 detected genes and genes need to be expressed in at least 3 cells.
 :::
 
 ```{r}
-table(pancreatic.cell.ide$Sample_Name)
+table(pci_index3$Sample_Name)
 ```
 
 # **Data preprocessing**
@@ -105,81 +146,94 @@ table(pancreatic.cell.ide$Sample_Name)
  + First let's remove the Multiplet and Undetermined in the data.
  
 ```{r}
-pancreatic.cell.ide <- pancreatic.cell.ide[, pancreatic.cell.ide$Sample_Name != "Multiplet"]
-pancreatic.cell.ide_1 <- pancreatic.cell.ide[, pancreatic.cell.ide$Sample_Name != "Undetermined"]
-pancreatic.cell.ide_1
+cat(sprintf("The current Idents levels are:\n%s\n", 
+            paste(levels(Idents(pci_index3)), collapse = "\n")), "\n")
+# Changer les Idents par defauts
+pci_index3 <- SetIdent(pci_index3, value = "Sample_Name")
+
+cat(sprintf("The new Idents levels are:\n%s\n", 
+            paste(levels(Idents(pci_index3)), collapse = "\n")))
+
 ```
+ 
+ 
+```{r}
+# Filtrer l'objet Seurat
+pci_index3_1 <- subset(pci_index3, subset = Sample_Name != "Multiplet" & Sample_Name != "Undetermined")
+
+cat(sprintf("The number of current features and cells are respectively : (%s Genes) and (%s Cells)\n", dim(pci_index3)[1], dim(pci_index3)[2]), "\n")
+ 
+cat(sprintf("The number of new features and cells after removing Undetermined and Multiplet are respectively : (%s Genes) and (%s Cells)\n", dim(pci_index3_1)[1], dim(pci_index3_1)[2]), "\n")
+# Vérifiez les échantillons après filtrage
+table(pci_index3_1$Sample_Name)
+```
+
+
+
 ```{r}
 # run garbage collect to free up memory
 gc()
 ```
 
-+ Let's plot the gene opf interest. 
-
-```{r}
-VlnPlot(pancreatic.cell.ide_1, features = "Ide", group.by = "Sample_Name")
-```
-
-
 
 ## **QC metrics calculation and visualization**
+
+### QC metrics calculation
 
 <!-- Add a QC parameter: the % of mitochondrial contamination -->
 
 ```{r MT}
 # Mitochondrial
-pancreatic.cell.ide_1 <- Seurat::PercentageFeatureSet(pancreatic.cell.ide_1,
+pci_index3_1 <- Seurat::PercentageFeatureSet(pci_index3_1,
                              pattern = "^mt-",
                              col.name = "percent.mt") 
 
-head(pancreatic.cell.ide_1@meta.data, 5)
+head(pci_index3_1@meta.data, 5)
 ```
 
 
 
 ```{r MT_plot}
-p1 <- Seurat::VlnPlot(pancreatic.cell.ide_1, 
+p1 <- Seurat::VlnPlot(pci_index3_1, 
                       features = "percent.mt")
-pdf(paste0(saveTo,"/MT.pdf"), width = 10, height = 5)
+pdf(paste0(preprocessing_dir,"/MT.pdf"), width = 10, height = 5)
+print(p1)
+dev.off()
+# Afficher le plot dans la console R
 p1
 ```
 
-
-```{r}
-p1
-```
 
 ### QC metrics visualization
-
-#### Violin plots
 
 <!-- Violin plots: number of genes detected, number of UMI, % of mitochondrial contamination -->
 
 ```{r Nfeature_Vlnplot}
 # Visualize QC metrics as a violin plot
-feats <- c("nFeature_RNA", "nCount_RNA", "percent.mt")
-p2 <- VlnPlot(pancreatic.cell.ide_1, group.by = "Sample_Name", features = feats, pt.size = 0.1, 
-              ncol = 3)
-pdf(paste0(saveTo,"/violin_QC.pdf"), width = 10, height = 5)
+p2 <- script_env$visViolin(pci_index3_1, thresould = 50)
+# pdf(paste0(preprocessing_dir,"/violin_QC.pdf"), width = 10, height = 5)
+# print(p2)
+# dev.off()
+# Afficher le plot dans la console R
 p2
 ```
-
-```{r}
-p2
-```
-
 
 ```{r Nfeauture_Scaterplot}
-plot1 <- FeatureScatter(pancreatic.cell.ide_1, group.by = "Sample_Name", feature1 = "nCount_RNA", 
+plot1 <- FeatureScatter(pci_index3_1, group.by = "Sample_Name", feature1 = "nCount_RNA", 
                         feature2 = "percent.mt")
-plot2 <- FeatureScatter(pancreatic.cell.ide_1, group.by = "Sample_Name",feature1 = "nCount_RNA", 
+plot2 <- FeatureScatter(pci_index3_1, group.by = "Sample_Name",feature1 = "nCount_RNA", 
                         feature2 = "nFeature_RNA")
-pdf(paste0(saveTo,"/FeatureScatter_QC.pdf"), width = 10, height = 5)
+pdf(paste0(preprocessing_dir,"/FeatureScatter_QC.pdf"), width = 10, height = 5)
+print(plot1 + plot2)
+dev.off()
+
+# Affichier les plots dans la console
 plot1 + plot2
 ```
 
 ```{r Nfeauture_Scaterplot1}
-plot1 + plot2
+ggplot(pci_index3_1@meta.data, aes(x = Putative_Cell_Algorithm, fill = Sample_Name)) +
+    geom_bar(position = "fill")
 ```
 
 
@@ -194,54 +248,90 @@ plot1 + plot2
 :::
 
 ```{r}
-C <- pancreatic.cell.ide_1@assays$RNA@counts
-C@x <- C@x / rep.int(colSums(C), diff(C@p)) * 100
-most_expressed <- order(Matrix::rowSums(C), decreasing = T)[30:1]
-boxplot(as.matrix(t(C[most_expressed, ])),
-    cex = 0.1, las = 1, xlab = "Percent counts per cell",
-    col = (scales::hue_pal())(20)[20:1], horizontal = TRUE
-)
+# Compute the proportion of counts of each gene per cell 
+# Use sparse matrix operations, if your dataset is large, doing matrix devisions the regular way will take a very long time.
+GeneExpr_results <- script_env$visGene_expr(pci_index3_1, numGenes = 50)
 ```
 
-As you can see, Ins2 constitutes up to 40% of the UMIs from a single cell and the other top genes are mitochondrial and ribosomal genes. 
+As you can see, Gcg constitutes up to 40% of the UMIs from a single cell and the other top genes are mitochondrial and ribosomal genes. 
 
 ```{r}
-selected_c <- WhichCells(pancreatic.cell.ide_1, expression = nFeature_RNA > 200)
-selected_f <- rownames(pancreatic.cell.ide_1)[Matrix::rowSums(pancreatic.cell.ide) > 3]
-
-pancreatic.cell.ide_1_filt <- subset(pancreatic.cell.ide_1, features = selected_f, cells = selected_c)
-print(paste("The number of remaining features and cells are respectively :", paste(dim(pancreatic.cell.ide_1_filt)[1]), "and", paste(dim(pancreatic.cell.ide_1_filt)[2]))) 
+t(head(GeneExpr_results$most_expressed, 10))
 ```
+
+
+```{r}
+#Genes detected in at least 3 cells and cells having more than 200 nonzero gene counts
+selected_c <- WhichCells(pci_index3_1, expression = nFeature_RNA > 200)
+selected_f <- rownames(pci_index3_1)[Matrix::rowSums(pci_index3) > 3]
+
+pci_index3_1_filt <- subset(pci_index3_1, features = selected_f, cells = selected_c)
+cat(sprintf("The number of current features and cells are respectively : (%s Genes) and (%s Cells)\n", dim(pci_index3_1)[1], dim(pci_index3_1)[2]), "\n")
+ 
+cat(sprintf("The number of features and cells after Genes > 3 and Cells > 200 genes are respectively : (%s Genes) and (%s Cells)\n", dim(pci_index3_1_filt)[1], dim(pci_index3_1_filt)[2]), "\n")
+```
+
+```{r}
+script_env$visViolin(pci_index3_1_filt, thresould = 50)
+```
+
+:::comment
+The *FilterSeurat function* used to filter the data : 
+nFeature_RNA : Nombre de gènes détectés par cellule
+Filtre les cellules entre le 1er et le 99e percentile par défaut
+Élimine les cellules mortes/vides (peu de gènes) et les doublets (trop de gènes)
+
+nCount_RNA : Nombre total de transcrits par cellule
+Filtre les cellules entre le 1er et le 99e percentile par défaut
+Élimine les cellules de mauvaise qualité et les outliers
+
+percent.mt : Pourcentage de transcrits mitochondriaux
+Filtre les cellules au-dessus du 95e percentile par défaut
+Élimine les cellules mourantes/stressées
+:::
+
 
 ```{r filtering}
-pancreatic.cell.ide_1_filt <- subset(pancreatic.cell.ide_1_filt, subset = nFeature_RNA < 7500 & nCount_RNA < 75000 & percent.mt < 50)
-pancreatic.cell.ide_1_filt
+cat(sprintf("The number of current features (genes detected in at least 3 cells and cells having more than 200 nonzero gene counts) are respectively : (%s Genes) and (%s Cells)\n", dim(pci_index3_1_filt)[1], dim(pci_index3_1_filt)[2]), "\n")
+
+print(table(pci_index3_1_filt$Sample_Name))
+cat("\n")
+# Fonction pour déterminer les seuils de filtrage optimaux
+# Run filter fonction
+results_filt <- script_env$FilterSeurat(pci_index3_1_filt)
+pci_index3_1_filt <- results_filt$filtered_object
+
+cat(sprintf("The number of features and cells after quantile filtering are respectively : (%s Genes) and (%s Cells)\n", dim(pci_index3_1_filt)[1], dim(pci_index3_1_filt)[2]), "\n")
+print(table(pci_index3_1_filt$Sample_Name))
+cat("\n")
+
+cat(sprintf("Pourcentage de cellules conservées est de : %.2f%% \n", results_filt$percent_kept), "\n")
 ```
+
 
 ```{r}
-table(pancreatic.cell.ide_1_filt$Sample_Name)
+write.table(results_filt$filtering_stats, file = paste0(preprocessing_dir,"/filtering_stats.txt"))
+results_filt$filtering_stats
 ```
 
 
-### Post-filtering QC metrics visualization
-
-```{r post_filtering_plot}
-pdf(paste0(saveTo,"/violin_QC_filtered.pdf"), width = 10, height = 5)
-feats <- c("nFeature_RNA", "nCount_RNA", "percent.mt")
-p_violin_QC_filtered <- VlnPlot(pancreatic.cell.ide_1_filt, group.by = "Sample_Name", features = feats, pt.size = 0.1, 
-              ncol = 3)
-p_violin_QC_filtered
-```
-
-```{r post_filtering_plot1}
-p_violin_QC_filtered
+```{r}
+pdf(paste0(preprocessing_dir,"/violin_QC_before_filtered.pdf"), width = 10, height = 5)
+print(results_filt$plots_before)
+dev.off()
+pdf(paste0(preprocessing_dir,"/violin_QC_after_filtered.pdf"), width = 10, height = 5)
+print(results_filt$plots_after)
+dev.off()
+# Show plots 
+results_filt$plots_before
+results_filt$plots_after
 ```
 
 
 ## **Normalizing data**
 
 ```{r Normalizing}
-pancreatic.cell.ide_1_filt <- pancreatic.cell.ide_1_filt %>%
+pci_index3_1_filt <- pci_index3_1_filt %>%
 # The default normalization method “LogNormalize” normalizes the feature expression measurements
 # for each cell by the total expression, multiplies this by a scale factor (10,000 by default),
 # and log-transforms the result.
@@ -250,26 +340,23 @@ pancreatic.cell.ide_1_filt <- pancreatic.cell.ide_1_filt %>%
 # Calculation of a subset of features that exhibit high cell-to-cell variation in the dataset
 # (i.e, they are highly expressed in some cells, and lowly expressed in others).
 # Focusing on these genes in downstream analysis like PCA helps to highlight biological signal in single-cell datasets.
-  FindVariableFeatures(selection.method = "vst", nfeatures = 2000)
+  FindVariableFeatures(selection.method = "vst", nfeatures = 3000)
 ```
 
 ```{r Top10_Highly_variable}
 # Identify the 10 most highly variable genes
-top10 <- head(VariableFeatures(pancreatic.cell.ide_1_filt), 20)
-top10
+cat(sprintf("The 20 highly variable features are: %s\n\n", paste(head(VariableFeatures(pci_index3_1_filt), 20), collapse = ", ")))
 ```
 
 
 ```{r Variablesfeatures_plot}
-pdf(paste0(saveTo,"/VariableFeatures.pdf"), width = 10, height = 5)
 # plot variable features with and without labels
-plot1 <- VariableFeaturePlot(pancreatic.cell.ide_1_filt)
-plot2 <- LabelPoints(plot = plot1, points = top10, repel = TRUE)
-plot1 + plot2
-```
-
-
-```{r Variablesfeatures_plot1}
+plot1 <- VariableFeaturePlot(pci_index3_1_filt)
+plot2 <- LabelPoints(plot = plot1, points = head(VariableFeatures(pci_index3_1_filt), 20), repel = TRUE)
+pdf(paste0(preprocessing_dir,"/VariableFeatures.pdf"), width = 10, height = 5)
+print(plot1 + plot2)
+dev.off()
+# Afficher les plots dans la console 
 plot1 + plot2
 ```
 
@@ -280,7 +367,7 @@ plot1 + plot2
 # Shifts the expression of each gene, so that the mean expression across cells is 0
 # Scales the expression of each gene, so that the variance across cells is 1
 # This step gives equal weight in downstream analyses, so that highly-expressed genes do not dominate
-pancreatic.cell.ide_1_filt <- ScaleData(object = pancreatic.cell.ide_1_filt, features = rownames(pancreatic.cell.ide_1_filt))
+pci_index3_1_filt <- ScaleData(object = pci_index3_1_filt, features = rownames(pci_index3_1_filt))
 ```
 
 <!-- ## **Exclude non-informative patient-specific genes from variable genes** -->
@@ -288,7 +375,7 @@ pancreatic.cell.ide_1_filt <- ScaleData(object = pancreatic.cell.ide_1_filt, fea
 <!-- <!-- Variable genes will be used for the dimension reduction so excluding non-informative specific genes helps removing batch effects --> -->
 
 <!-- ```{r, include=FALSE} -->
-<!-- var.genes <- VariableFeatures(pancreatic.cell.ide) -->
+<!-- var.genes <- VariableFeatures(pci_index3) -->
 <!-- #print(paste("IG genes found variable :", paste(var.genes[grep("^IG", var.genes, perl=TRUE)], collapse=" "))) -->
 <!-- print(paste("IG genes found variable :", paste(var.genes[grep("^IGK|^IGH|^IGL|^IGJ|^IGS|^IGD|IGFN1", var.genes, perl=TRUE)], collapse=" "))) #10 -->
 <!-- print(paste("TCR genes found variable :", paste(var.genes[grep("^TRA|^TRB|^TRG", var.genes, perl=TRUE)], collapse=" "))) #33 -->
@@ -312,175 +399,65 @@ pancreatic.cell.ide_1_filt <- ScaleData(object = pancreatic.cell.ide_1_filt, fea
 ### Linear dimensional reduction: PCA
 
 ```{r RunPca}
-pancreatic.cell.ide_1_filt <- RunPCA(object = pancreatic.cell.ide_1_filt, features = VariableFeatures(object = pancreatic.cell.ide_1_filt))
-#pancreatic.cell.ide_1_filt <- RunPCA(object = pancreatic.cell.ide_1_filt, features = excl.var.genes)
+pci_index3_1_filt <- RunPCA(object = pci_index3_1_filt, features = VariableFeatures(object = pci_index3_1_filt))
+#pci_index3_1_filt <- RunPCA(object = pci_index3_1_filt, features = excl.var.genes)
 
-PCA <- DimPlot(object = pancreatic.cell.ide_1_filt, reduction = "pca", shuffle = TRUE) +
+DimPlot(object = pci_index3_1_filt, reduction = "pca", shuffle = TRUE) +
   ggtitle("")
-ggsave(plot = PCA, filename = "PCA.png",
-       path = saveTo, width=5, height=4)
+
 ```
 
 ```{r Pca_features}
-print(pancreatic.cell.ide_1_filt[["pca"]], dims = 1:5, nfeatures = 5)
+print(pci_index3_1_filt[["pca"]], dims = 1:5, nfeatures = 10)
 ```
 
-```{r Pca_features_plot}
-pdf(paste0(saveTo,"/VariableFeatures_pca_imp.pdf"), width = 10, height = 5)
-pca_ariableFeatures_pca_imp <- VizDimLoadings(pancreatic.cell.ide_1_filt, dims = 1:2,
-                                              reduction = "pca")
-pca_ariableFeatures_pca_imp
-```
-
-
-```{r Pca_features_plot1}
-pca_ariableFeatures_pca_imp
-```
 
 
 ```{r Pca_Dimplot}
-DimPlot(pancreatic.cell.ide_1_filt, reduction = "pca")
+DimPlot(pci_index3_1_filt, reduction = "pca")
 ```
 
 ```{r PCA1_Dimheatmap_plot}
-pdf(paste0(saveTo,"/DimHeatmap_pc1.pdf"), width = 10, height = 5)
-DimHeatmap(pancreatic.cell.ide_1_filt, dims = 1, cells = 500, balanced = TRUE)
-```
-
-
-```{r PCA1_Dimheatmap_plot1}
-DimHeatmap(pancreatic.cell.ide_1_filt, dims = 1, cells = 500, balanced = TRUE)
-```
-
-
-```{r PCA_Dimheatmap_plot}
 #In particular DimHeatmap() allows for easy exploration of the primary sources of heterogeneity in a dataset, and can be useful #when trying to decide which PCs to include for further downstream analyses. Both cells and features are ordered according to #their PCA scores. Setting cells to a number plots the ‘extreme’ cells on both ends of the spectrum, which dramatically speeds #plotting for large datasets. Though clearly a supervised analysis, we find this to be a valuable tool for exploring correlated #feature sets.
-pdf(paste0(saveTo,"/DimHeatmap.pdf"), width = 10, height = 5)
-DimHeatmap(pancreatic.cell.ide_1_filt, dims = 1:15, cells = 500, balanced = TRUE)
-```
-
-
-```{r PCA_Dimheatmap_plot1}
-DimHeatmap(pancreatic.cell.ide_1_filt, dims = 1:15, cells = 500, balanced = TRUE)
+#pdf(paste0(preprocessing_dir,"/DimHeatmap_pc1.pdf"), width = 10, height = 5)
+DimHeatmap(pci_index3_1_filt, dims = 1:5, cells = 500, balanced = TRUE)
 ```
 
 
 <!---- Determine the ‘dimensionality’ of the dataset ---->
 
 ```{r Elbow_plot}
-elbow <- ElbowPlot(object = pancreatic.cell.ide_1_filt) + ggtitle("")
+elbow <- ElbowPlot(object = pci_index3_1_filt) + ggtitle("")
 ggsave(plot = elbow, filename = "elbow.png",
-       path = saveTo, width=7, height=4)
+       path = preprocessing_dir, width=7, height=4)
 elbow
 ```
 
 ### Perform non-linear dimensional reduction: tSNE and UMAP 
 
-#### Find Clusters Cells
-
-```{r Find_clusters}
-pancreatic.cell.ide_1_filt <- FindNeighbors(pancreatic.cell.ide_1_filt, dims = 1:10)
-pancreatic.cell.ide_1_filt <- FindClusters(pancreatic.cell.ide_1_filt, resolution = 0.05)
-```   
-
-```{r Cluster_id}
-# Look at cluster IDs of the first 5 cells
-head(Idents(pancreatic.cell.ide_1_filt), 5)
-```
-
 
 ```{r RunUmap}
-# If you haven't installed UMAP, you can do so via reticulate::py_install(packages =
-# 'umap-learn')
-pancreatic.cell.ide_1_filt <- RunUMAP(pancreatic.cell.ide_1_filt, dims = 1:10)
+# If you haven't installed UMAP, you can do so via reticulate::py_install(packages = 'umap-learn')
+pci_index3_1_filt <- pci_index3_1_filt %>%
+  RunTSNE(dims = 1:20, check_duplicates = FALSE) %>%
+  RunUMAP(dims = 1:20)
 ```
 
 ```{r Umap_cluster}
-# note that you can set `label = TRUE` or use the LabelClusters function to help label
-# individual clusters
-pdf(paste0(saveTo,"/Umap_cluster.pdf"), width = 10, height = 5)
-p_umap_cluster <- DimPlot(pancreatic.cell.ide_1_filt, reduction = "umap") +
-                      ggtitle("Pancreatic Cell IDE - UMAP by Cluster")
-p_umap_cluster
-```
-
-```{r Umap_cluster_plot}
-p_umap_cluster
-```
-
-
-```{r Umap_sample_name}
-# note that you can set `label = TRUE` or use the LabelClusters function to help label
-# individual clusters
-pdf(paste0(saveTo,"/Umap_sample_name.pdf"), width = 10, height = 5)
-p_umap_sample_name <- DimPlot(pancreatic.cell.ide_1_filt, reduction = "umap", group.by = "Sample_Name") +
-                      ggtitle("Pancreatic Cell IDE - UMAP by Sample_Name")
-p_umap_sample_name
-```
-
-```{r Umap_sample_name_plot}
-p_umap_sample_name
-```
-
-```{r Umap_split_sample_name}
-pdf(paste0(saveTo,"/Umap_split_sample_name.pdf"), width = 10, height = 5)
-p_umap_split_sample_name <- DimPlot(pancreatic.cell.ide_1_filt, reduction = "umap", split.by = "Sample_Name") +
-                      ggtitle("Pancreatic Cell IDE - UMAP Split by Sample_Name")
-p_umap_split_sample_name
-```
-
-
-```{r Umap_split_sample_name_plot}
-p_umap_split_sample_name
-```
-
-
-```{r TSne}
-pancreatic.cell.ide_1_filt <- RunTSNE(pancreatic.cell.ide_1_filt, dims = 1:10)
+DimPlot(pci_index3_1_filt, reduction = "umap") +
+                      ggtitle("Pancreatic Cell IMMUNE - UMAP by Cluster")
 ```
 
 
 ```{r Tsne_cluster}
-pdf(paste0(saveTo,"/Tsne_cluster.pdf"), width = 10, height = 5)
-p_tsne_cluster <- DimPlot(pancreatic.cell.ide_1_filt, reduction = "tsne") +
-                      ggtitle("Pancreatic Cell IDE - TSNE by Cluster")
-p_tsne_cluster
+DimPlot(pci_index3_1_filt, reduction = "tsne") +
+                      ggtitle("Pancreatic Cell IMMUNE - TSNE by Cluster")
 ```
 
-```{r Tsne_cluster_plot}
-p_tsne_cluster
-```
-
-
-```{r Tsne_sample_name}
-pdf(paste0(saveTo,"/Tsne_sample_name.pdf"), width = 10, height = 5)
-p_tsne_sample_name <- DimPlot(pancreatic.cell.ide_1_filt, reduction = "tsne", group.by = "Sample_Name") +
-                      ggtitle("Pancreatic Cell IDE - TSNE by Sample_Name")
-p_tsne_sample_name
-```
-
-```{r Tsne_sample_name_plot}
-p_tsne_sample_name
-```
-
-```{r Tsne_split_sample_name}
-pdf(paste0(saveTo,"/tsne_split_sample_name.pdf"), width = 10, height = 5)
-p_tsne_split_sample_name <- DimPlot(pancreatic.cell.ide_1_filt, reduction = "tsne", split.by = "Sample_Name") +
-                      ggtitle("Pancreatic Cell IDE - TSNE Split by Sample_Name")
-p_tsne_split_sample_name
-```
-
-
-```{r sne_split_sample_name_plot}
-p_tsne_split_sample_name
-```
 
 ## Find doublets with DoubletFinder
 
 ```{r}
-suppressMessages(library(DoubletFinder))
-# Find doublets
-
 # BD provided doublet rates with different cell load numbers
 rhapsody_doublet_rate <- data.frame(
                          "cell_num" = c(100,500,1000*(1:20)), 
@@ -493,827 +470,387 @@ rhapsody_doublet_rate <- data.frame(
 model_rhap <- lm(rate ~ cell_num, 
                  rhapsody_doublet_rate)
 
-# define function
-func_get_doublets <- function(seuratObj,
-                              est_doublet_model = model_rhap,
-                              pc = 1:15) # number of PC components to be used
-     {
-  
-     DefaultAssay(seuratObj) <- "RNA"
-  
-     # Find pK values
-     sweep.res.list <- paramSweep(seuratObj, 
-                                     PCs = pc, 
-                                     sct = F)
-
-     sweep.stats <- summarizeSweep(sweep.res.list, 
-                                   GT = FALSE)
-  
-     bcmvn <- find.pK(sweep.stats)
-
-     pK_bcmvn <- bcmvn$pK[which.max(bcmvn$BCmetric)] %>% 
-                 as.character() %>% 
-                 as.numeric()
-  
-     # estimate doublet rate based on cell number
-     DoubletRate = predict(est_doublet_model, 
-                   data.frame(cell_num = dim(seuratObj)[2]))/100
-  
-     nExp_poi <- round(DoubletRate*ncol(seuratObj)) 
-     
-     seuratObj <- doubletFinder(seuratObj, 
-                                   PCs = pc, 
-                                   pN = 0.25, 
-                                   pK = pK_bcmvn, 
-                                   nExp = nExp_poi, 
-                                   reuse.pANN = F, 
-                                   sct = F)
-  
-     temp1 <- grepl("DF.classifications", 
-                    colnames(seuratObj@meta.data), 
-                    ignore.case = T)
-
-     colnames(seuratObj@meta.data)[temp1] <- "doublet_check"
-
-     seuratObj$doublet_check <- seuratObj$doublet_check
-  
-     # return output
-     return(seuratObj)
-
-} # end of function
-
 # use function to find doublets
-pancreatic.cell.ide_1_filt <- func_get_doublets(pancreatic.cell.ide_1_filt,
-                                          pc = 1:10)
+pci_index3_1_filt <- script_env$detect_doublets(pci_index3_1_filt, est_doublet_model = model_rhap, pc = 1:20,
+                            reuse.results = FALSE)
 
 ```
 
+
 ```{r}
-table(pancreatic.cell.ide_1_filt$doublet_check)
+cat(sprintf("The number of Doublet and Singlet cells detected are following : (%s Doublet) and (%s Singlet)", table(pci_index3_1_filt$doublet_check)[[1]], 
+            table(pci_index3_1_filt$doublet_check)[[2]]), "\n")
+
 ```
 
 
 ```{r}
 wrap_plots(
-    DimPlot(pancreatic.cell.ide_1_filt, 
+    DimPlot(pci_index3_1_filt, 
             group.by = "Sample_Name") + NoAxes(),
-    DimPlot(pancreatic.cell.ide_1_filt, 
+    DimPlot(pci_index3_1_filt, 
                     group.by = "doublet_check") + NoAxes(),
     ncol = 2
 )
 ```
 
 ```{r}
-VlnPlot(pancreatic.cell.ide_1_filt, features = "nFeature_RNA", group.by = "doublet_check", pt.size = .1)
+visDoublet <- function(obj, thresould = 50) {
+  p1 <- VlnPlot(obj, features = "nFeature_RNA", , group.by = "doublet_check") + NoLegend() + labs(title = "", x = "", y = "nGenes")
+  p2 <- DimPlot(obj, 
+                    group.by = "doublet_check") + NoAxes()
+  p3 <- FeaturePlot(obj, features = "pANN_0.25_0.005_600") +
+    scale_color_gradient(low = "blue", high = "red") +
+    ggtitle("UMAP Plot of Doublet Scores")
+  cowplot::plot_grid(p1, p2, p3, ncol = 3)
+}
+
+pdf(paste0(preprocessing_dir,"/violin_doublet.pdf"), width = 10, height = 5)
+print(visDoublet(pci_index3_1_filt))
+dev.off()
+visDoublet(pci_index3_1_filt)
 ```
+
+
 ```{r}
-dim(pancreatic.cell.ide_1_filt)
+# Filter cells based on doublet score threshold
+pci_index3_1_filt_done <- subset(pci_index3_1_filt, subset = doublet_check == "Singlet")
+  
+dim(pci_index3_1_filt)
+```
+
+```{r}
+saveRDS(pci_index3_1_filt_done, file = paste0(project_dir, "/data/pci_index3_filtered.rds"))
+```
+
+
+# Data integration
+
+
+```{r save_dir}
+preprocessing_integrated_dir_dir <- file.path(integration_dir, "Preprocessing_Results")
+
+if (!dir.exists(preprocessing_integrated_dir_dir)) {
+  dir.create(preprocessing_integrated_dir_dir)
+}
+
 ```
 
 
 ```{r}
-pancreatic.cell.ide_1_filt <- pancreatic.cell.ide_1_filt[, pancreatic.cell.ide_1_filt@meta.data$doublet_check == "Singlet"]
-dim(pancreatic.cell.ide_1_filt)
+pci_index3_1_filt_done <- readRDS(paste0(project_dir, '/data/pci_index3_filtered.rds'))
+pci_index1_1_filt_done <- readRDS(paste0(project_dir, '/data/pci_index1_filtered.rds'))
+
+cat(sprintf("The dimension of the 2 index are following : %s, %s genes for index1 and index3 respectively and  %s, %s Cells for index1 and index3 respectively ", 
+             dim(pci_index1_1_filt_done)[1], dim(pci_index3_1_filt_done)[1], dim(pci_index1_1_filt_done)[2], dim(pci_index3_1_filt_done)[2]), "\n")
+```
+
+## Integration method 
+
+```{r}
+Seurat::Project(pci_index1_1_filt_done) <- "PCI1"
+Seurat::Project(pci_index3_1_filt_done) <- "PCI3"
+pci_index1_1_filt_done$orig.ident <- "PCI1"
+pci_index3_1_filt_done$orig.ident <- "PCI3"
+# 1. Méthode CCA (Canonical Correlation Analysis) - Seurat v3
+# C'est la méthode "classique" de Seurat
+seurat.list <- list(pci_index1_1_filt_done, pci_index3_1_filt_done)
+features <- SelectIntegrationFeatures(object.list = seurat.list)
+anchors <- FindIntegrationAnchors(object.list = seurat.list, 
+                                 anchor.features = features,
+                                 reduction = "cca")
+combined.cca <- IntegrateData(anchorset = anchors)
+
+# Traitement standard après intégration
+DefaultAssay(combined.cca) <- "integrated"
+combined.cca <- ScaleData(combined.cca)
+combined.cca <- RunPCA(combined.cca)
+ElbowPlot(object = combined.cca)
+combined.cca <- combined.cca %>%
+  RunTSNE(dims = 1:20, check_duplicates = FALSE) %>%
+  RunUMAP(dims = 1:20)
+
+# 2. Méthode RPCA (Reciprocal PCA) - Alternative dans Seurat
+anchors.rpca <- FindIntegrationAnchors(object.list = seurat.list,
+                                      dims = 1:20,
+                                      reduction = "rpca",
+                                      anchor.features = features)
+combined.rpca <- IntegrateData(anchorset = anchors.rpca)
+
+# Traitement standard après intégration
+DefaultAssay(combined.rpca) <- "integrated"
+combined.rpca <- ScaleData(combined.rpca)
+combined.rpca <- RunPCA(combined.rpca)
+ElbowPlot(object = combined.rpca)
+combined.rpca <- combined.rpca %>%
+  RunTSNE(dims = 1:20, check_duplicates = FALSE) %>%
+  RunUMAP(dims = 1:20)
+
+# 3. Méthode Harmony
+# D'abord, merger les données sans intégration
+pci1_3_merged <- merge(pci_index1_1_filt_done, y = pci_index3_1_filt_done, 
+                 add.cell.ids = c("pci1", "pci3"), 
+                 project = "PCI")
+
+# Prétraitement standard
+pci1_3_merged <- NormalizeData(pci1_3_merged)
+pci1_3_merged <- FindVariableFeatures(pci1_3_merged, nfeatures = 3000)
+pci1_3_merged <- ScaleData(pci1_3_merged)
+pci1_3_merged <- RunPCA(pci1_3_merged)
+
+# Appliquer Harmony
+combined.harmony <- RunHarmony(pci1_3_merged, 
+                             group.by.vars = "orig.ident",
+                             dims.use = 1:20) %>%
+  RunTSNE(reduction="harmony", dims = 1:20, check_duplicates = FALSE) %>%
+  RunUMAP(reduction="harmony", dims = 1:20)
+
 ```
 
 
-### Finding differentially expressed features (cluster biomarkers)
+```{r}
+# Visualisation et comparaison des résultats
+# Fonction pour visualiser les résultats
 
-<!--- Markers outputs --->
-<!-- data.frame with a ranked list of putative markers as rows, and associated statistics as columns (p-values, ROC score, etc., depending on the test used (test.use)). The following columns are always present: -->
-
-<!-- avg_logFC: log fold-chage of the average expression between the two groups. Positive values indicate that the gene is more highly expressed in the first group -->
-
-<!-- pct.1: The percentage of cells where the gene is detected in the first group -->
-
-<!-- pct.2: The percentage of cells where the gene is detected in the second group -->
-
-<!-- p_val_adj: Adjusted p-value, based on bonferroni correction using all genes in the dataset -->
-
-
-#### Markers distinguising cluster 0 to others
-<!--- Markers distinguising cluster 0 to others --->
-
-```{r Cluster0_markrs}
-# find all markers of cluster 0
-cluster0.markers <- FindMarkers(pancreatic.cell.ide_1_filt, ident.1 = 0, min.pct = 0.25)
-head(cluster0.markers, n = 10)
+pdf(paste0(preprocessing_integrated_dir,"/umap_cca.pdf"), width = 15, height = 5)
+print(script_env$PlotIntegrationResults(combined.cca, "umap", "CCA"))
+dev.off()
+script_env$PlotIntegrationResults(seurat_obj = combined.cca, reduction = "umap", title = "CCA")
 ```
 
-```{r Cluster0_markrs_plot}
-FeaturePlot(pancreatic.cell.ide_1_filt, features = c("Rpl36a", "Rpl35", "Rps15a", "Rpl9", "Rpl27")) 
-```
-
-#### Markers distinguising cluster 5 to others
-<!--- Markers distinguising cluster 5 to others --->
-
-```{r Cluster5_markrs}
-# # find all markers of cluster 5
-# cluster5.markers <- FindMarkers(pancreatic.cell.ide_1_filt, ident.1 = 5, min.pct = 0.25)
-# head(cluster5.markers, n = 10)
-```
-
-```{r Cluster5_markrs_plot} 
-#FeaturePlot(pancreatic.cell.ide_1_filt, features = c("Ifitm3", "Timp3", "Sparc", "Col4a2", "Ltbp4", "Tm4sf1")) 
-```
-
-#### Markers distinguising cluster 6 to others
-<!--- Markers distinguising cluster 6 to others --->
-
-```{r Cluster6_markrs}
-# find all markers of cluster 6
-# cluster1.markers <- FindMarkers(pancreatic.cell.ide_1_filt, ident.1 = 6, min.pct = 0.25)
-# head(cluster1.markers, n = 10)
-```
-
-```{r Cluster6_markrs_plot}
-#FeaturePlot(pancreatic.cell.ide_1_filt, features = c("Ebf2", "Cyp2j13", "Enho", "Dio1", "Slco1a5", "Gpr45")) 
+```{r}
+pdf(paste0(preprocessing_integrated_dir,"/umap_rpca.pdf"), width = 15, height = 5)
+print(script_env$PlotIntegrationResults(combined.rpca, "umap", "RPCA"))
+dev.off()
+script_env$PlotIntegrationResults(combined.rpca, "umap", "RPCA")
 ```
 
 
-#### Markers distinguising 1 cluster versus others
-<!--- Markers distinguising for every cluster compared to all remaining cells, report only the positive --->
- + Markers distinguising for every cluster compared to all remaining cells, report only the positive 
+```{r}
+pdf(paste0(preprocessing_integrated_dir,"/umap_harmony.pdf"), width = 15, height = 5)
+print(script_env$PlotIntegrationResults(combined.harmony, "umap", "Harmony"))
+dev.off()
+script_env$PlotIntegrationResults(combined.harmony, "umap", "Harmony")
+```
  
-```{r Clusters_markrs}
-# find markers for every cluster compared to all remaining cells, report only the positive
-# ones
-pancreatic.cell.ide_1_filt.markers <- FindAllMarkers(pancreatic.cell.ide_1_filt, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)
-pancreatic.cell.ide_1_filt.markers %>%
-    group_by(cluster) %>%
-    slice_max(n = 2, order_by = avg_log2FC)
-write.table(pancreatic.cell.ide_1_filt.markers, file = paste0(saveAnnot,"/all_markers.txt"))
-write.csv(pancreatic.cell.ide_1_filt.markers, file = paste0(saveAnnot,"/all_markers.csv"))
-```
-
-```{r Clusters_markrs_plot}
-pdf(paste0(saveAnnot,"/Markers_cluster.pdf"), width = 10, height = 5)
-VlnPlot(pancreatic.cell.ide_1_filt, features = c("Ins1", "Gcg", "Ppy", "Sst", "Ide"))
-```
 
 
 ```{r}
-VlnPlot(pancreatic.cell.ide_1_filt, features = c("Ins1", "Gcg", "Ppy", "Sst", "Ide"))
-```
-
-
-```{r Clusters_markrs1}
-# you can plot raw counts as well
-VlnPlot(pancreatic.cell.ide_1_filt, features = c("Ins1", "Gcg", "Ppy", "Sst", "Ide"), slot = "counts", log = TRUE)
-```
-
-```{r RidgePlot}
-# Ridge plots - from ggridges. Visualize single cell expression distributions in each cluster
-RidgePlot(pancreatic.cell.ide_1_filt, features = c("Ins1", "Gcg", "Ppy", "Sst", "Ide"), ncol = 2)
-```
-
-
-<!--- Markers highly variable--->
-+ Markers highly variable
-```{r Var_features}
-head(pancreatic.cell.ide_1_filt@assays$RNA@var.features, 10)
-```
-
-```{r Var_features_plot}
-VlnPlot(pancreatic.cell.ide_1_filt, features = c("Cd74", "H2-Ab1", "H2-Aa", "H2-Eb1", "Apoe", "Rgs5",  "Kdr", "Ctss", "Plvap", "Plpp3"))
-```
-
-<!--- Markers PC1 and PC2 --->
-+ Markers PC1 and PC2
-
-```{r pca_markers}
-print(pancreatic.cell.ide_1_filt[["pca"]], dims = 1:5, nfeatures = 5)
-```
-
-
-```{r pca_markers_plot1}
-FeaturePlot(pancreatic.cell.ide_1_filt, features = c("Msn", "Srgn", "B2m", "Nrp1", "Ifitm3")) 
-```
-
-
-<!--- Markers for each cluster accross cells --->
-+ Markers for each cluster accross cells
-
-```{r Markers_4each_cluster}
-pancreatic.cell.ide_1_filt.markers %>%
-    group_by(cluster) %>%
-    top_n(n = 10, wt = avg_log2FC) -> top10
-Markers_4each_cluster <- DoHeatmap(pancreatic.cell.ide_1_filt, features = top10$gene) + NoLegend()
-ggsave(plot=Markers_4each_cluster,filename="Markers_4each_cluster.png",
-       path= saveAnnot, width=25, height=15)
-```
-
-
-```{r}
-Markers_4each_cluster
-```
-
-
-
-```{r Markers_4each_cluster_uniaue}
- p_adj_cutoff = 0.05
- log2FC_cutoff = 1
- view_top_X_genes = 5
- # Find marker genes for each cluster group against the rest
-  Seurat::Idents(pancreatic.cell.ide_1_filt) <- "seurat_clusters"
-  
-  cluster_DGE <- SeuratWrappers::RunPrestoAll(pancreatic.cell.ide_1_filt, 
-                                              assay = "RNA", 
-                                              only.pos = FALSE, 
-                                              verbose = FALSE)
-  
-  # example of taking the top X genes in each DGE group and removing the duplicates
-  cluster_DGE <- cluster_DGE[abs(cluster_DGE$avg_log2FC) > log2FC_cutoff & 
-                             cluster_DGE$p_val_adj < p_adj_cutoff, ]
-  
-  top_genes_cluster <- cluster_DGE %>% 
-    group_by(cluster)%>% 
-    slice_max(n = view_top_X_genes, 
-              order_by = avg_log2FC) %>% 
-    dplyr::pull(gene) %>% 
-    unique()
-subset_demo1_DGEs = list(DGEs_cluster = cluster_DGE, 
-              top_cluster_gene = top_genes_cluster)
-```
-
-```{r Markers_4each_cluster_uniaue1}
-subset_demo1_DGEs$top_cluster_gene
-```
-
-```{r Markers_4each_cluster_uniaue_plot}
-p_cell_markers <- DotPlot(pancreatic.cell.ide_1_filt, 
-                     features = subset_demo1_DGEs$top_cluster_gene, 
-                     group.by = "seurat_clusters") + 
-             coord_flip() +
-             RotatedAxis() +
-             ggtitle("Pancreatic Cell IDE Markers")
-p_cell_markers1 <- ggplotly(p_cell_markers)
-ggsave(plot=p_cell_markers,filename="Pancreatic_Cell_IDE_Clusters_Markers.pdf",
-       path= saveAnnot, width=15, height=15)
-```
-
-
-```{r}
-p_cell_markers1
-```
-
-##  Cell cycle state
-
-```{r}
-# Before running CellCycleScoring the data need to be normalized and logtransformed.
-pancreatic.cell.ide_2 <- CellCycleScoring(
-    object = pancreatic.cell.ide_1_filt,
-    g2m.features = cc.genes$g2m.genes,
-    s.features = cc.genes$s.genes
+# Évaluation de la qualité d'intégration
+# Comparer les scores pour chaque méthode
+integration_scores <- list(
+    CCA = script_env$compute_integration_metrics(combined.cca),
+    RPCA = script_env$compute_integration_metrics(combined.rpca),
+    Harmony = script_env$compute_integration_metrics(combined.harmony)
 )
 ```
 
 
 ```{r}
-VlnPlot(pancreatic.cell.ide_2, features = c("S.Score", "G2M.Score"), ncol = 3, pt.size = .1)
+batch_key = "orig.ident"
+# 2. Calcul de l'écart-type des scores LISI pour chaque méthode
+lisi_variability <- sapply(integration_scores, function(x) {
+  sd(x$lisi_scores[[batch_key]], na.rm = TRUE)
+})
+
+# Affichage des écarts-types
+print("Écart-type des scores LISI par méthode d'intégration :")
+print(lisi_variability)
+
+# 3. Vérification des scores LISI par lot pour chaque méthode
+
+# Extraire les scores LISI pour chaque méthode et chaque lot
+script_env$plot_integration_metrics_lot(integration_scores, batch_key = "orig.ident")
+# 4. Affichage des résultats moyens des scores LISI
+cat("Moyenne des scores LISI pour chaque méthode d'intégration :\n")
+cat(paste("CCA : ", integration_scores$CCA$mean_lisi, "\n"))
+cat(paste("RPCA : ", integration_scores$RPCA$mean_lisi, "\n"))
+cat(paste("Harmony : ", integration_scores$Harmony$mean_lisi, "\n"))
 ```
+Les scores LISI permettent d'évaluer la qualité de l'intégration des lots ou groupes de données.
+D'après les statistiques présentées :
+- Écart-type des scores LISI par méthode :
 
+CCA : 0.1895687
+RPCA : 0.1717766
+Harmony : 0.1759565
 
+Cela indique que la méthode RPCA présente la plus faible variabilité des scores LISI, suivie par Harmony et CCA. Une faible variabilité signifie une meilleure consistance des résultats d'intégration.
+Moyenne des scores LISI par méthode :
 
-## Cell annotation
+CCA : 1.83728130956071
+RPCA : 1.85512703425548
+- Harmony : 1.84929601173755
 
-### AZimuth
+La méthode CCA a la plus faible moyenne des scores LISI, suivie par Harmony et RPCA. Plus la moyenne est basse, mieux l'intégration est réalisée.
+- On constate visuellement que :
 
-+ See available references
+La méthode CCA montre une plus grande dispersion et des scores LISI plus élevés que les deux autres méthodes.
+La méthode Harmony semble offrir la meilleure intégration avec des scores LISI les plus groupés et les plus bas.
+La méthode RPCA se situe entre CCA et Harmony, avec une intégration plus homogène que CCA mais légèrement moins bonne que Harmony.
 
-You can search all available datasets in SeuratData (focusing on Azimuth references)
-
+Donc globalement, la méthode Harmony semble être la plus performante pour intégrer efficacement les différents lots de données, suivie de RPCA puis CCA.
 
 ```{r}
-available_data <- AvailableData()
-available_data[grep("Azimuth", available_data[, 3]), 1:3]
+saveRDS(combined.harmony, file = paste0(project_dir, "/data/pci_integrated_harmony.rds"))
 ```
+
+## Seurat version 5
+
+In previous versions of Seurat, we would require the data to be represented as nine different Seurat objects. When using Seurat v5 assays, we can instead keep all the data in one object, but simply split the layers. We can also run a standard scRNA-seq analysis (i.e. without integration). Note that since the data is split into layers, normalization and variable feature identification is performed for each batch independently (a consensus set of variable features is automatically identified).
 
 ```{r}
-options(timeout = 240) # To fix a bug in SeuratData by incresing the timeout to 60 --> 240
-pancreatic.cell.ide_1_filt_Azimuth <- RunAzimuth(pancreatic.cell.ide_1_filt, reference = "pancreasref")
-```
-
-
-```{r}
-sort(table(pancreatic.cell.ide_1_filt_Azimuth$predicted.annotation.l1), decreasing = TRUE)
-```
-
-
-```{r}
-p1 <- DimPlot(pancreatic.cell.ide_1_filt_Azimuth, group.by = "predicted.annotation.l1", label = TRUE) + NoLegend()
-p2 <- DimPlot(pancreatic.cell.ide_1_filt_Azimuth, group.by = "seurat_clusters")
-p1 + p2
-```
-
-### Knowing markers
-
-```{r Knowing-markers}
-plot_marker = function(x, name = NULL){
-   DefaultAssay(pancreatic.cell.ide_1_filt) = "RNA"
-   FeaturePlot(pancreatic.cell.ide_1_filt, x) +
-      ggtitle(label = paste0(x, ifelse(!is.null(name), paste0(" (", name, ")"), "")))
-}
-pdf(paste0(saveAnnot,"/phenotypic_markers.pdf"), width = 10, height = 5)
-plot_marker("Ins1", "beta cells") 
-plot_marker("Ins2", "beta cells") 
-plot_marker("Ppy", "Gamma cells") 
-plot_marker("Sst", "Delta cells") 
-plot_marker("Sparc", "Endothelial cells") 
-invisible(dev.off())
-
-```
-
-::: comment
-+ Cluster 0 anntotation
-:::
-
-```{r}
-#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ ???
-plot_marker("Ins2", "beta cells") # Cluster 1 Confirmed Beta
-plot_marker("Insrr", "beta cells") # Cluster 1 Confirmed Beta
-plot_marker("Ero1b", "beta cells") # Cluster 1 Confirmed Beta
-plot_marker("Tm4sf4", "Alpha cells") # Cluster 2 Confirmed Alpha
-plot_marker("Slc7a2", "Alpha cells") # Cluster 2 Confirmed Alpha
-plot_marker("Ttr", "Alpha cells") # Cluster 2 Confirmed Alpha 
-plot_marker("Ppy", "Gamma cells") # Cluster 2 (refined 7)  Confirmed Gamma
-plot_marker("Hnf1aos1", "Pancreatic progenitor cells")  # Cluster 0 ? 
-```
-
-::: comment
-+ Cluster 1 anntotation
-:::
-
-```{r}
-#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ Beta cells
-plot_marker("Ins1", "Beta cells") # Cluster 1 Confirmed Beta
-plot_marker("Ins2", "Beta cells") # Cluster 1 Confirmed
-plot_marker("Iapp", "Beta cells") # Cluster 1 Confirmed others markers: 
-plot_marker("G6pc2", "Beta cells")
-plot_marker("Adcyap1", "Beta cells")
-plot_marker("Dlk1", "Beta cells")
-```
-
-::: comment
-+ Cluster 2 anntotation
-:::
-
-```{r}
-#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ Alpha cells
-plot_marker("Gcg", "Alpha cells") # Cluster 2 Confirmed Alpha 
-plot_marker("Ttr", "Alpha cells") # Cluster 2 Confirmed Alpha 
-plot_marker("Irx2", "Alpha cells") # Cluster 2 Confirmed Alpha 
-plot_marker("Gls", "Alpha cells") # Cluster 2 Confirmed Alpha
-plot_marker("Tm4sf4", "Alpha cells") # Cluster 2 Confirmed Alpha
-plot_marker("Slc7a2", "Alpha cells") # Cluster 2 Confirmed Alpha
-```
-```{r}
-#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ Gamma cells
-plot_marker("Ppy", "Gamma cells") # Cluster 2 (refined 7)  Confirmed Gamma
-plot_marker("Id2", "Gamma cells") # Cluster 2 (refined 7)  Confirmed Gamma
-plot_marker("Etv1", "Gamma cells") # Cluster 2 (refined 7)  Confirmed Gamma
-plot_marker("Fxyd2", "Gamma cells") # Cluster 2 (refined 7)  Confirmed Gamma
-plot_marker("Stmn2", "Gamma cells") # Cluster 2 (refined 7)  Confirmed Gamma
-```
-
-
-::: comment
-+ Cluster 3 anntotation
-:::
-
-```{r}
-#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ Delta cells
-plot_marker("Sst", "Delta cells") # 3 Confirmed Delta 
-plot_marker("Hhex", "Delta cells") # 3 
-plot_marker("Rbp4", "Delta cells") # 3 
-plot_marker("Prg4", "Delta cells") # 3 
-plot_marker("Rgs2", "Delta cells") # 3 
-```
-
-::: comment
-+ Cluster 4 anntotation
-:::
-
-```{r}
-#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++   Alpha cells +/-
-plot_marker("Ndst4", "Neuron cells") # Cluster 4 ??? 	Arx
-plot_marker("Galnt13", "Neuron cells") # Cluster 4 ??? 	Arx
-plot_marker("Ttr", "Alpha cells") # Cluster 2 Confirmed Alpha 
-plot_marker("Irx2", "Alpha cells") # Cluster 2 Confirmed Alpha 
-plot_marker("Gls", "Alpha cells") # Cluster 2 Confirmed Alpha
-# Potential markers Ndst4 Galnt13 Kcnj3 Mctp2 Cdh9
-# Ndst4, Galnt13, Pou6f2, Kcnj3, Mctp2, Nxph1, Nrg1, Cdh9, Fam184b, Grik2
-# Enrichmenet : Oogenesis Phase Fetal Germ cell:Fetal Gonad :	GALNT13;FAM184B;GRIK2;MCTP2
-# Enrichmenet : Neuronal Progenitor cell:Undefined GALNT13;NXPH1
-```
-
-::: comment
-+ Cluster 5 anntotation
-:::
-
-```{r}
-#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ Cluster 5 Endothelial cells
-plot_marker("Sparc", "Endothelial cells") # Cluster 5 
-plot_marker("Cd34", "Endothelial cells") # Cluster 5
-plot_marker("Epas1", "Pancreatic progenitor cells") # Cluster 5 
-#======
-plot_marker("Col6a1", "Pancreatic stellate cells") # Cluster 5 Confirmed  
-plot_marker("Col1a2", "Pancreatic stellate cells") # Cluster 
-plot_marker("Timp3", "Pancreatic stellate cells") # Cluster 
-plot_marker("Sparc", "Pancreatic stellate cells") # Cluster  
-# plot_marker("Col3a1", "Pancreatic stellate cells") # Cluster
-# plot_marker("Mgp", "Pancreatic stellate cells") # Cluster
-# plot_marker("Col4a1", "Pancreatic stellate cells") # Cluster
-#======
-plot_marker("S100a6", "Ductal cells") # Cluster 5 Confirmed 
-plot_marker("Anxa2", "Ductal cells") # Cluster 5 Confirmed
-#plot_marker("S100a10", "Ductal cells") # Cluster 5 Confirmed Calcrl?
-```
-
-::: comment
-+ Cluster 6 anntotation
-:::
-
-```{r}
-#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ Cluster 6 Immun system Cells
-plot_marker("Cd68", "B cells") # Cluster 6 ?
-plot_marker("Cd74", "B cells") # Cluster 6 Confirmed
-plot_marker("Cd93", "B cells") # Cluster 6 Confirmed
-# plot_marker("Ms4a14", "B cells") # Cluster 6 ? 
-# plot_marker("Cd72", "B cells") # Cluster 6 Confirmed
-# plot_marker("Ighm", "B cells") # Cluster 6 Confirmed Cd86 
-#====
-plot_marker("Cd68", "Macrophage cells") # Cluster 6 moyen
-plot_marker("Tyrobp", "Macrophage cells") # Bien 
-plot_marker("H2-DMa", "Macrophage cells") # Bien
-plot_marker("Lyz2", "Macrophage cells") # Bien
-#plot_marker("Cxcl16", "Macrophage cells") # bien
-# plot_marker("Scimp", "Macrophage cells") # faible
-# plot_marker("Clec4a2", "Macrophage cells") # Moyen 
-# plot_marker("Trem2", "Macrophage cells") # Moyen 
-# plot_marker("Ccr2", "Macrophage cells") # Cluster 6 moyen 
-#====
-# plot_marker("Itgam", "NK cells") # Cluster 6 moyen 
-# plot_marker("Tgfb1", "NK cells") # Cluster 6 moyen
-plot_marker("Dock2", "NK cells") # Cluster 6 moyen
-#====
-plot_marker("Cd14", "Monocytes cells") # Cluster 6 moyen 
-# plot_marker("Ccr2", "Monocytes cells") # Cluster 6 moyen 
-# plot_marker("Csf3r", "Monocytes cells") # Cluster 6 moyen 
-#====
-# plot_marker("Il7r", "T cells") # Cluster 6 moyen 
-# plot_marker("Cxcr4", "T cells") # Cluster 6 moyen 
-plot_marker("Cd52", "T cells") # Cluster 6 moyen 
-```
-
-::: comment
-+ Cluster 7 anntotation
-:::
-
-```{r}
-#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ Progenitor Cell : Cycling
-# Top2a, Mki67, Ckap2l, Hmmr, Cenpe, Pbk, Ube2c, Nek2, Depdc1a, Pimreg
-# Gamma delta T cells : Stmn1, Troap, Nusap1, Ccnb1
-plot_marker("Top2a", "Progenitor cells") # Cluster 7 confirmed Cycling
-plot_marker("Mki67", "Progenitor cells") # Cluster 7 confirmed Cycling Hmgb2 
-plot_marker("Hmmr", "Progenitor cells") # Cluster 7 confirmed Cycling 
-plot_marker("Cenpe", "Progenitor cells") # Cluster 7 confirmed Cycling Cenpf
-
-```
-
-```{r}
-p_umap_cluster 
-```
-#### Refine Clusters based on the knowing markers
-
-```{r}
-pancreatic.cell.ide_1_filt_annot <- FindClusters(pancreatic.cell.ide_1_filt, resolution = 1)
-```
-
-```{r}
- DimPlot(pancreatic.cell.ide_1_filt_annot, reduction = "umap", label = TRUE) +
-                      ggtitle("Pancreatic Cell IDE - UMAP by Cluster")
-```
-
-
-```{r}
-new.cluster.ids <- c("Alpha","Alpha+/-","Alpha+/-", "Beta","Beta","Alpha+/-", "Beta +/-","Beta","Delta",
-                     "Alpha+/-","Beta +/-","Beta +/-","Neuronal","Gamma", "Alpha/Beta","Beta +/-",
-                     "Endothelial", "Delta", "Immune", "Cycling", "Quiescent_stellate", "Ductal", "Immune")
-names(new.cluster.ids) <- levels(pancreatic.cell.ide_1_filt_annot)
-pancreatic.cell.ide_1_filt_annot <- RenameIdents(pancreatic.cell.ide_1_filt_annot, new.cluster.ids)
-```
-
-
-
-```{r}
-p_umap_cluster_refined <- DimPlot(pancreatic.cell.ide_1_filt_annot, reduction = "umap", label = TRUE) +
-                      ggtitle("Pancreatic Cell IDE - UMAP by Cluster")
-p_umap_cluster_refined
-```
-
-
-```{r}
-DimPlot(pancreatic.cell.ide_1_filt_annot, reduction = "umap", label = TRUE, pt.size = 0.5)
-```
-```{r}
-# Ridge plots - from ggridges. Visualize single cell expression distributions in each cluster
-RidgePlot(pancreatic.cell.ide_1_filt_annot, features = c("Ins1", "Gcg", "Ppy", "Sst", "Ide"), ncol = 2)
-```
-
-
-```{r}
-plot_marker = function(x, name = NULL){
-   DefaultAssay(pancreatic.cell.ide_1_filt_annot) = "RNA"
-   FeaturePlot(pancreatic.cell.ide_2, x) +
-      ggtitle(label = paste0(x, ifelse(!is.null(name), paste0(" (", name, ")"), "")))
-}
-plot_marker("Sst", "Gamma cells")
-```
-
-
-```{r, eval=FALSE}
-saveRDS(pancreatic.cell.ide_1_filt_annot, file = "pancreatic.cell.ide_1_filt_annot.rds")
-```
-
-
-## **Integrate data with harmony**
-
-<!-- The following is quite time and memory-consuming so possibly better to run it on HPC -->
-
-```{r, eval = FALSE}
-my.seurat.harmony <- RunHarmony(object = pancreatic.cell.ide_1_filt_annot,
-                                reduction.use = "pca",
-                                dims.use = 1:10,
-                                group.by.vars = "Sample_Name") %>%
-  RunTSNE(reduction="harmony", dims = 1:10) %>%
-  RunUMAP(reduction = "harmony", dims = 1:10)
-```
-
-```{r}
-options(timeout = 240) # To fix a bug in SeuratData by incresing the timeout to 60 --> 240
-my.seurat.harmony_Azimuth <- RunAzimuth(my.seurat.harmony, reference = "pancreasref")
-```
-
-
-```{r}
-sort(table(my.seurat.harmony_Azimuth$predicted.annotation.l1), decreasing = TRUE)
-```
-
-```{r}
-p1_har <- DimPlot(my.seurat.harmony_Azimuth, group.by = "predicted.annotation.l1", label = TRUE) + NoLegend()
-p2_har <- DimPlot(my.seurat.harmony_Azimuth, group.by = "seurat_clusters")
-p1_har + p2_har
-```
-
-
-```{r}
-my.seurat.harmony <- FindNeighbors(my.seurat.harmony, reduction = "harmony", dims = 1:10) %>% FindClusters(resolution = 1)
-DimPlot(my.seurat.harmony, group.by = "Sample_Name", reduction = "umap")
-```
-
-```{r}
-DimPlot(pancreatic.cell.ide_1_filt_annot, reduction = "umap", label = TRUE, pt.size = 0.5)
-```
-
-```{r}
-DimPlot(my.seurat.harmony, reduction = "umap", label = TRUE)
-```
-
-```{r}
-new.cluster.ids <- c("Beta Ins +","Alpha","Beta Ins +", "Beta Ins +","Beta","Beta Ins +", "Beta Ins ++","Beta Ins ++", "Delta", "Neuronal","Gamma", "Beta Ins ++", "Beta Ins ++","Endothelial",
-                     "Immune", "Delta", "Cycling", "Quiescent_stellate/Ductal", "Delta")
-# Rename identity classes
-#my.seurat.harmony_annot <- RenameIdents(object = my.seurat.harmony_annot, `Alpha/Beta` = "Beta Ins +")
-names(new.cluster.ids) <- levels(my.seurat.harmony)
-my.seurat.harmony_annot <- RenameIdents(my.seurat.harmony, new.cluster.ids)
-```
-
-
-```{r}
-DimPlot(my.seurat.harmony_annot, reduction = "umap", label = TRUE, pt.size = 0.5)
-```
-
-
-```{r, eval=FALSE}
-saveRDS(my.seurat.harmony_annot, file = "my.seurat.harmony_annot.rds")
-```
-
-
-# differentiall expression Ananlysis
-
-## Compare IDE + and IDE -
-
-```{r}
-CellsMeta = my.seurat.harmony_annot@meta.data
-head(CellsMeta)
-
-Condition = my.seurat.harmony_annot@meta.data$Sample_Name
-Cell.type = my.seurat.harmony_annot@active.ident
-
-CellsMeta["Cell.type"] <- Cell.type
-
-CellsMeta["Condition"] <- Condition
-
-CellsMeta <- CellsMeta %>%  
-  mutate(Condition = fct_recode(Condition,
-    "Ide-" = "SampleTag04_mm",
-    "Ide-" = "SampleTag01_mm",
-    "Ide+" = "SampleTag02_mm",
-    "Ide+" = "SampleTag03_mm",
-  ))
-
-head(CellsMeta)
-
-CellsMetaTrim <- subset(CellsMeta, select = c("Condition", "Cell.type"))
-head(CellsMetaTrim)
+pci1_3_combined <- merge(pci_index1_1_filt_done, y = pci_index3_1_filt_done, 
+                 add.cell.ids = c("pci1", "pci3"), 
+                 project = "PCI")
+
+#pci1_3_combined[["RNA"]] <- SeuratObject:::JoinLayers(pci1_3_combined[["RNA"]])
+
+pci1_3_combined[["RNA"]] <- split(pci1_3_combined[["RNA"]], f = pci1_3_combined$orig.ident)
+
+# Prétraitement standard
+pci1_3_combined <- NormalizeData(pci1_3_combined)
+pci1_3_combined <- FindVariableFeatures(pci1_3_combined, nfeatures = 3000)
+pci1_3_combined <- ScaleData(pci1_3_combined)
+pci1_3_combined <- RunPCA(pci1_3_combined)
 
 ```
 
 
 ```{r}
-my.seurat.harmony_annot <- AddMetaData(my.seurat.harmony_annot, CellsMetaTrim)
-
-head(my.seurat.harmony_annot@meta.data)
-
-VlnPlot(my.seurat.harmony_annot,features = c("Ins1", "Gcg", "Ppy", "Sst", "Ide"), group.by ="Condition") 
-VlnPlot(my.seurat.harmony_annot,features = c("Ins1", "Gcg", "Ppy", "Sst", "Ide"), group.by ="Cell.type") 
-```
-
-```{r}
-RidgePlot(my.seurat.harmony_annot, features = c("Ins1", "Ins2","Gcg", "Ppy", "Sst", "Ide"), group.by ="Condition", ncol = 2)
-```
-
-
-```{r}
-# Compute differentiall expression
-DGE_cell_selection.cluster <- FindAllMarkers(my.seurat.harmony_annot,
-    log2FC.threshold = 0.1,
-    test.use = "wilcox",
-    min.pct = 0.1,
-    min.diff.pct = 0.2,
-    only.pos = TRUE,
-    max.cells.per.ident = 50,
-    assay = "RNA"
+pci1_3_combined <- IntegrateLayers(
+  object = pci1_3_combined, method = CCAIntegration,
+  orig.reduction = "pca", new.reduction = "integrated.cca",
+  verbose = FALSE
+)
+options(future.globals.maxSize = 8 * 1024^3)  # 8 Go
+pci1_3_combined <- IntegrateLayers(
+  object = pci1_3_combined, method = RPCAIntegration,
+  orig.reduction = "pca", new.reduction = "integrated.rpca",
+  verbose = FALSE
+)
+pci1_3_combined <- IntegrateLayers(
+  object = pci1_3_combined, method = HarmonyIntegration,
+  orig.reduction = "pca", new.reduction = "harmony",
+  verbose = FALSE
+)
+pci1_3_combined <- IntegrateLayers(
+  object = pci1_3_combined, method = FastMNNIntegration,
+  new.reduction = "integrated.mnn",
+  verbose = FALSE
 )
 ```
 
 
 ```{r}
-DGE_cell_selection.cluster %>%
-    group_by(cluster) %>%
-    top_n(-5, p_val) -> top5_cell_selection.cluster
-#VlnPlot(my.seurat.harmony_annot, features = as.character(unique(top5_cell_selection.cluster$gene)), ncol = 5, group.by = "Condition", assay = "RNA", pt.size = .1)
-```
-
-### Compute differentiall expression Beta versus others clusters
-
-```{r}
-Ide.markers.beta <- FindMarkers(my.seurat.harmony_annot, ident.1 = "Beta",  slot = "counts", test.use = "DESeq2",
-      verbose = F)
-Ide.markers.beta$gene <- rownames(Ide.markers.beta)
-write.table(Ide.markers.beta, file = paste0(saveAnnot,"/Ide.beta.markers.txt"))
- Ide.markers.beta.plot <- ggplot(Ide.markers.beta, aes(avg_log2FC, -log10(p_val))) + geom_point(size = 0.5, alpha = 0.5) + theme_bw() +
-      ylab("-log10(unadjusted p-value)") + geom_text_repel(aes(label = ifelse(p_val_adj < 0.01, gene,
-      "")), colour = "red", size = 3) +
-   ggtitle("Diff exp Beta versus others")
- Ide.markers.beta.plot
+pci1_3_combined <- pci1_3_combined %>% 
+  RunTSNE(reduction="integrated.cca", dims = 1:20, check_duplicates = FALSE, reduction.name = "tsne.cca") %>%
+  RunUMAP(reduction="integrated.cca", dims = 1:20, reduction.name = "umap.cca")
+pci1_3_combined <- pci1_3_combined %>% 
+  RunTSNE(reduction="integrated.rpca", dims = 1:20, check_duplicates = FALSE, reduction.name = "tsne.rpca") %>%
+  RunUMAP(reduction="integrated.rpca", dims = 1:20, reduction.name = "umap.rpca")
+pci1_3_combined <- pci1_3_combined %>% 
+  RunTSNE(reduction="harmony", dims = 1:20, check_duplicates = FALSE, reduction.name = "tsne.harmony") %>%
+  RunUMAP(reduction="harmony", dims = 1:20, reduction.name = "umap.harmony")
+pci1_3_combined <- pci1_3_combined %>% 
+  RunTSNE(reduction="integrated.mnn", dims = 1:20, check_duplicates = FALSE, reduction.name = "tsne.mnn") %>%
+  RunUMAP(reduction="integrated.mnn", dims = 1:20, reduction.name = "umap.mnn")
 ```
 
 
 ```{r}
-Ide.markers.beta1 <- Ide.markers.beta
-Ide.markers.beta1$direction <- ifelse(Ide.markers.beta1$avg_log2FC > 0, "Beta", "Others")
-Ide.markers.beta1 %>%
-    group_by(direction) %>%
-    top_n(-5, p_val) -> top5.Ide.markers.beta
-top5.Ide.markers.beta %>%
-    group_by(direction) %>%
-    top_n(5, avg_log2FC) -> top5.Ide.markers.beta1
-VlnPlot(my.seurat.harmony_annot, features = as.character(unique(top5.Ide.markers.beta1$gene)), ncol = 5, group.by = "Cell.type", assay = "RNA", pt.size = .1)
-VlnPlot(my.seurat.harmony_annot, features = as.character(unique(top5.Ide.markers.beta1$gene)), ncol = 5, group.by = "Condition", assay = "RNA", pt.size = .1)
+pdf(paste0(preprocessing_integrated_dir,"/umap_integrated_cca.pdf"), width = 15, height = 5)
+print(script_env$PlotIntegrationResults(pci1_3_combined, "umap.cca", "integrated_cca"))
+dev.off()
+script_env$PlotIntegrationResults(seurat_obj = pci1_3_combined, reduction = "umap.cca", title = "integrated_cca")
 ```
 
-### Compute differentiall expression Ide- versus others Ide+
+
 
 ```{r}
-Ide.ko <- my.seurat.harmony_annot
-Ide.ko <- SetIdent(Ide.ko, value = "Condition")
-table(Ide.ko@active.ident)
+pdf(paste0(preprocessing_integrated_dir,"/umap_integrated.rpca.pdf"), width = 15, height = 5)
+print(script_env$PlotIntegrationResults(pci1_3_combined, "umap.rpca", "integrated.rpca"))
+dev.off()
+script_env$PlotIntegrationResults(seurat_obj = pci1_3_combined, reduction = "umap.rpca", title = "integrated.rpca")
+```
 
-VlnPlot(Ide.ko,features = c("Ins1", "Gcg", "Ppy", "Sst", "Ide"))
+
+
+```{r}
+pdf(paste0(preprocessing_integrated_dir,"/umap_integrated.mnn.pdf"), width = 15, height = 5)
+print(script_env$PlotIntegrationResults(pci1_3_combined, "umap.mnn", "integrated.mnn"))
+dev.off()
+script_env$PlotIntegrationResults(seurat_obj = pci1_3_combined, reduction = "umap.mnn", title = "integrated.mnn")
+```
+
+
+```{r}
+pdf(paste0(preprocessing_integrated_dir,"/umap_integrated_harmony.pdf"), width = 15, height = 5)
+print(script_env$PlotIntegrationResults(pci1_3_combined, "umap.harmony", "integrated_harmony"))
+dev.off()
+script_env$PlotIntegrationResults(seurat_obj = pci1_3_combined, reduction = "umap.harmony", title = "integrated_harmony")
 ```
 
 ```{r}
-# Compute differentiall expression
-DGE_cell_selection.Ide <- FindAllMarkers(Ide.ko,
-    log2FC.threshold = 0.1,
-    test.use = "wilcox",
-    min.pct = 0.1,
-    min.diff.pct = 0.2,
-    only.pos = TRUE,
-    max.cells.per.ident = 50,
-    assay = "RNA"
+# Comparer les scores pour chaque méthode
+integration_scores_s5 <- list(
+    CCA = script_env$compute_integration_metrics(pci1_3_combined, reduction = "umap.cca"),
+    RPCA = script_env$compute_integration_metrics(pci1_3_combined, reduction = "umap.rpca"),
+    MNN = script_env$compute_integration_metrics(pci1_3_combined, reduction = "umap.mnn"),
+    Harmony = script_env$compute_integration_metrics(pci1_3_combined, reduction = "umap.harmony")
 )
+str(integration_scores_s5)
 ```
 
 
 ```{r}
-DGE_cell_selection.Ide %>%
-    group_by(cluster) %>%
-    top_n(-5, p_val) -> top5_cell_selection.Ide
-VlnPlot(Ide.ko, features = as.character(unique(top5_cell_selection.Ide$gene)), ncol = 5, group.by = "Cell.type", assay = "RNA", pt.size = .1)
-VlnPlot(Ide.ko, features = as.character(unique(top5_cell_selection.Ide$gene)), ncol = 5, group.by = "Condition", assay = "RNA", pt.size = .1)
+batch_key = "orig.ident"
+# 2. Calcul de l'écart-type des scores LISI pour chaque méthode
+lisi_variability <- sapply(integration_scores_s5, function(x) {
+  sd(x$lisi_scores[[batch_key]], na.rm = TRUE)
+})
 
+# Affichage des écarts-types
+print("Écart-type des scores LISI par méthode d'intégration (Une faible variabilité signifie une meilleure consistance des résultats d'intégration.) :")
+print(lisi_variability)
+
+# 4. Affichage des résultats moyens des scores LISI
+cat("Moyenne des scores LISI pour chaque méthode d'intégration (Plus la moyenne est basse, mieux l'intégration est réalisée) :\n")
+cat(paste("CCA : ", integration_scores_s5$CCA$mean_lisi, "\n"))
+cat(paste("RPCA : ", integration_scores_s5$RPCA$mean_lisi, "\n"))
+cat(paste("MNN : ", integration_scores_s5$MNN$mean_lisi, "\n"))
+cat(paste("Harmony : ", integration_scores_s5$Harmony$mean_lisi, "\n"))
+#plot les lots 
+script_env$plot_integration_metrics_lot(lisi_integration_scores = integration_scores_s5, batch_key = "orig.ident")
+```
+
+```{r}
+saveRDS(pci1_3_combined, file = paste0(project_dir, "/data/pci1_3_combined_s5.rds"))
 ```
 
 
 ```{r}
-Ide.ko.markers <- FindMarkers(Ide.ko, ident.1 = "Ide-", ident.2 = "Ide+", slot = "counts", test.use = "DESeq2",
-      verbose = F)
-Ide.ko.markers$gene <- rownames(Ide.ko.markers)
-# Define as Covid or Ctrl in the df and add a gene column
-Ide.ko.markers$direction <- ifelse(Ide.ko.markers$avg_log2FC > 0, "Ide-", "Ide+")
-write.table(Ide.ko.markers, file = paste0(saveAnnot,"/Ide.ko.markers.txt"))
- Ide.ko.markers.plot <- ggplot(Ide.ko.markers, aes(avg_log2FC, -log10(p_val))) + geom_point(size = 0.5, alpha = 0.5) + theme_bw() +
-      ylab("-log10(unadjusted p-value)") + geom_text_repel(aes(label = ifelse(p_val_adj < 0.01, gene,
-      "")), colour = "red", size = 3) +
-   ggtitle("Differential Exp Ide- versus Ide+")
- Ide.ko.markers.plot
+DimPlot(pci_index1_1_filt_done, reduction = "umap", split.by = "Sample_Name", ncol = 2)
+DimPlot(pci_index3_1_filt_done, reduction = "umap", split.by = "Sample_Name", ncol = 2)
+DimPlot(pci1_3_combined, reduction = "umap.cca", split.by = "Sample_Name", ncol = 2)
 ```
 
 
 ```{r}
-Ide.ko.markers %>%
-    group_by(direction) %>%
-    top_n(-5, p_val) -> top5.Ide.markers
-VlnPlot(Ide.ko, features = as.character(unique(top5.Ide.markers$gene)), ncol = 5, group.by = "Cell.type", assay = "RNA", pt.size = .1)
-VlnPlot(Ide.ko, features = as.character(unique(top5.Ide.markers$gene)), ncol = 5, group.by = "Condition", assay = "RNA", pt.size = .1)
-```
-
-### Compute differentiall expression Ide- versus others Ide+ in beta cluster
-
-```{r}
-# select all cells in cluster 1
-beta.sub <- subset(x = my.seurat.harmony_annot, idents = "Beta")
-beta.sub <- SetIdent(beta.sub, value = "Condition")
-
-table(beta.sub@active.ident)
-VlnPlot(beta.sub,features = c("Ins1", "Gcg", "Ppy", "Sst", "Ide"))
+DimPlot(pci_index1_1_filt_done, reduction = "umap", split.by = "Sample_Name", ncol = 2)
+DimPlot(pci_index3_1_filt_done, reduction = "umap", split.by = "Sample_Name", ncol = 2)
+DimPlot(combined.harmony, reduction = "umap", split.by = "Sample_Name", ncol = 2)
+DimPlot(pci1_3_combined, reduction = "umap.harmony", split.by = "Sample_Name", ncol = 2)
 ```
 
 
-
-```{r}
-# Compute differentiall expression
-DGE_cell_selection.Ide.beta <- FindAllMarkers(beta.sub,
-    log2FC.threshold = 0.1,
-    test.use = "wilcox",
-    min.pct = 0.1,
-    min.diff.pct = 0.2,
-    only.pos = TRUE,
-    max.cells.per.ident = 50,
-    assay = "RNA"
-)
+```{r Nfeauture_Scaterplot1}
+ggplot(pci1_3_combined@meta.data, aes(x = orig.ident, fill = Sample_Name)) +
+    geom_bar()
 ```
 
-
-```{r}
-DGE_cell_selection.Ide.beta %>%
-    group_by(cluster) %>%
-    top_n(-5, p_val) -> top5_cell_selection.Ide.beta
-VlnPlot(beta.sub, features = as.character(unique(top5_cell_selection.Ide.beta$gene)), ncol = 5, group.by = "Condition", assay = "RNA", pt.size = .1)
-```
-
-
-```{r}
-Ide.ko.beta.sub.markers <- FindMarkers(beta.sub, ident.1 = "Ide-", ident.2 = "Ide+", slot = "counts", test.use = "DESeq2",
-      verbose = F)
-Ide.ko.beta.sub.markers$gene <- rownames(Ide.ko.beta.sub.markers)
-# Define as Covid or Ctrl in the df and add a gene column
-Ide.ko.beta.sub.markers1 <- Ide.ko.beta.sub.markers
-Ide.ko.beta.sub.markers1$direction <- ifelse(Ide.ko.beta.sub.markers1$avg_log2FC > 0, "Ide-", "Ide+")
-write.table(Ide.ko.beta.sub.markers, file = paste0(saveAnnot,"/Ide.ko.beta.sub.markers.txt"))
- Ide.ko.beta.sub.markers.plot <- ggplot(Ide.ko.beta.sub.markers, aes(avg_log2FC, -log10(p_val))) + geom_point(size = 0.5, alpha = 0.5) + theme_bw() +
-      ylab("-log10(unadjusted p-value)") + geom_text_repel(aes(label = ifelse(p_val_adj < 0.01, gene,
-      "")), colour = "red", size = 3) +
-   ggtitle("Differential Exp Ide- versus Ide+")
- Ide.ko.beta.sub.markers.plot
-```
-
-
-```{r}
-Ide.ko.beta.sub.markers1 %>%
-    group_by(direction) %>%
-    top_n(-5, p_val) -> top5.Ide.ko.beta.sub.markers
-VlnPlot(beta.sub, features = as.character(unique(top5.Ide.ko.beta.sub.markers$gene)), ncol = 5, group.by = "Condition", assay = "RNA", pt.size = .1)
-```
-
-```{r}
-DimPlot(beta.sub, reduction = "umap", label = TRUE, pt.size = 0.5)
-```
-
-
-
+:::comment
+The End !
+:::
 
 
