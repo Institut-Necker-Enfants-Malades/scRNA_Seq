@@ -1,5 +1,5 @@
 ---
-title: "Single Cell RNA-seq analysis, preprocessing step for Pancreas cell immune"
+title: "Single Cell RNA-seq analysis, preprocessing step for Rhapsody"
 author: "Lamine TOURE"
 date: "`r Sys.Date()`"
 output: 
